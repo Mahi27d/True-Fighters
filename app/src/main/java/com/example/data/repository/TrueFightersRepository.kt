@@ -2765,6 +2765,8 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
         }
 
         val id = if (notification.id.isNotBlank()) notification.id else if (notification.notificationId.isNotBlank()) notification.notificationId else "notif_${UUID.randomUUID().toString().take(10)}"
+        val callerUid = notification.createdByUid.ifBlank { auth.currentUser?.uid ?: "" }
+        val callerEmail = notification.createdByEmail.ifBlank { auth.currentUser?.email ?: "" }
         val data = mapOf(
             "notificationId" to id,
             "recipientUserId" to notification.recipientUserId,
@@ -2778,6 +2780,9 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
             "channelId" to notification.channelId,
             "read" to false,
             "dedupKey" to notification.dedupKey,
+            "createdByUid" to callerUid,
+            "createdByEmail" to callerEmail,
+            "deliveryStatus" to "pending",
             "createdAt" to FieldValue.serverTimestamp()
         )
         db.collection("notifications").document(id).set(data).await()

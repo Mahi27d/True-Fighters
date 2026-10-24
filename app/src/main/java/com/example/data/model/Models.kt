@@ -570,6 +570,9 @@ data class AppNotification(
     val channelId: String = "general_notifications",
     val read: Boolean = false,
     val dedupKey: String = "",
+    val createdByUid: String = "",
+    val createdByEmail: String = "",
+    val deliveryStatus: String = "pending",
     @ServerTimestamp val createdAt: Timestamp? = null
 ) {
     val effectiveId: String get() = id.ifBlank { notificationId }

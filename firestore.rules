@@ -374,10 +374,12 @@ service cloud.firestore {
         isCoach()
       );
       allow create: if isSignedIn() && (
-        isAdmin() ||
-        (isCoachForBranch(incoming().get('branchId', '')) && incoming().get('type', '') in ['schedule', 'attendance', 'grading'])
+        (isAdmin() && (incoming().get('branchId', '') == '' || isBranchAdminFor(incoming().get('branchId', '')))) ||
+        (isCoachForBranch(incoming().get('branchId', '')) &&
+         incoming().get('type', '') in ['schedule', 'attendance', 'grading', 'class_reminder', 'class_rescheduled', 'class_cancelled', 'attendance_alert', 'grading_submitted', 'announcement'])
       ) &&
-      incoming().get('title', '') is string && incoming().get('title', '').size() > 0;
+      incoming().get('title', '') is string && incoming().get('title', '').size() > 0 &&
+      (incoming().get('createdByUid', request.auth.uid) == request.auth.uid);
       allow update: if isSignedIn() && (
         (request.auth.uid == resource.data.get('recipientUserId', '') &&
          incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt'])) ||

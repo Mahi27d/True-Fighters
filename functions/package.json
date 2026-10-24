@@ -1,0 +1,17 @@
+{
+  "name": "true-fighters-push-relay-functions",
+  "version": "1.0.0",
+  "description": "Authenticated Firebase Cloud Functions push notification relay for True Fighters Martial Arts Academy",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "test": "node --test pushRelay.test.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.1.0"
+  },
+  "private": true
+}
