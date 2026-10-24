@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Crimson rising sun circle in center safe-zone -->
+    <path
+        android:fillColor="#E53935"
+        android:pathData="M54,28 A26,26 0 1,0 54,80 A26,26 0 1,0 54,28 Z" />
+    <!-- White martial arts strike silhouette & belt ribbons -->
+    <!-- Head -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,34 A4,4 0 1,0 48,42 A4,4 0 1,0 48,34 Z" />
+    <!-- Dynamic high kick fighter torso & extended leg -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,42 L52,43 L68,32 C70,30.5 73,32.5 72,35 L62,47 L58,56 L62,72 C62,74 59,75 58,73 L54,58 L48,56 L44,72 C43,74 40,73 41,71 L46,52 L42,47 C40.5,45 42,42 46,42 Z" />
+    <!-- Punching fist -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,45 L36,46 C34,46 34,43 36,43 L47,43 Z" />
+    <!-- Belt knot and ribbon tails -->
+    <path
+        android:fillColor="#FFD54F"
+        android:pathData="M48,53 L56,54 L55,57 L47,56 Z M51,57 L47,66 L49,67 L53,58 Z M53,57 L57,65 L55,66 L52,58 Z" />
+</vector>

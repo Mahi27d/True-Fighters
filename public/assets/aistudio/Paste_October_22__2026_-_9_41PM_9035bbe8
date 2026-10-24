@@ -1,0 +1,701 @@
+# True Fighters Martial Arts Academy — Google AI Studio Build Prompts
+
+## Master Prompt — Paste First
+
+```text
+You are a senior full-stack engineer, Flutter developer, Firebase architect, security engineer, and QA engineer.
+
+Build a production-oriented application for True Fighters Martial Arts Academy.
+
+Website: https://www.truefighters.in/
+
+PROJECT REQUIREMENTS
+1. Android mobile application using Flutter and Dart.
+2. Web-based admin dashboard using Flutter Web.
+3. Firebase Authentication for email/password and phone OTP.
+4. Cloud Firestore as the primary database.
+5. Firebase Storage for authorized documents, profile images, certificates, and training media.
+6. Firebase Cloud Functions for trusted backend operations.
+7. Firebase Cloud Messaging for push notifications.
+8. Razorpay for online payments, subject to merchant configuration.
+9. GitHub-friendly source code, documentation, automated tests, and deployment instructions.
+
+USER ROLES
+- Student: View personal profile, branch, schedule, attendance, fees, payment history, training progress, certificates, videos, and announcements.
+- Coach: View authorized students and batches, manage permitted attendance, record training progress, and view schedules.
+- Admin: Manage branches, students, coaches, programs, batches, schedules, attendance, fee plans, invoices, payments, certificates, announcements, videos, and reports.
+
+CORE BUSINESS REQUIREMENTS
+- Support multiple academy branches.
+- Every branch-specific record must have a branchId.
+- Users must access only the data permitted by their role and branch assignments.
+- Support student registration, approval, and activation.
+- Support manual attendance and authorized attendance corrections.
+- Support recurring fee plans, invoices, manual payments, and online payments.
+- Support belt ranks, progress records, and certificates.
+- Support training videos with access controls.
+- Support announcements and push notifications.
+- Maintain audit logs for sensitive administrative actions.
+- Protect minors' personal information and media.
+- Provide loading, empty, success, validation, and error states.
+- Make the UI responsive and accessible.
+
+TECHNICAL RULES
+- Keep the Flutter Android and Flutter Web targets compatible.
+- Use a clean architecture with presentation, application, data, and domain layers where appropriate.
+- Separate models, repositories, services, and UI widgets.
+- Use null safety, reusable components, consistent naming, and clear error handling.
+- Do not hardcode secrets, API keys, passwords, or payment credentials.
+- Never trust client-side role checks or payment-success messages.
+- Enforce authorization using Firebase Security Rules and trusted backend logic.
+- Store monetary amounts as integer paise, not floating-point currency values.
+- Use server-side timestamps for important records.
+- Make sensitive operations auditable.
+- Add tests for business logic, authorization-sensitive workflows, and critical UI behavior.
+- Do not fabricate Firebase configuration, credentials, deployment results, or test results.
+- Do not silently replace Flutter with React, or Firebase with another backend.
+- If a required integration or configuration is unavailable, explain exactly what is missing and provide a safe implementation interface.
+
+IMPLEMENTATION WORKFLOW
+Build the application in 10 phases. Implement only the requested phase and its dependencies in each step.
+
+At the beginning of each phase:
+1. Inspect the existing source code and project structure.
+2. Identify completed features and missing requirements.
+3. Reuse existing working code.
+4. Explain the files to be created or modified.
+
+At the end of each phase:
+1. Summarize completed features.
+2. List changed files.
+3. Provide setup and configuration instructions.
+4. Run available tests and static analysis where possible.
+5. Report actual errors and unresolved issues.
+6. Fix issues before claiming the phase is complete.
+7. Preserve all previously working features.
+
+Do not merely describe code. Implement it in the available project workspace whenever supported. If the environment cannot create or edit the requested files directly, provide complete file contents and exact file paths.
+
+The target is a secure, maintainable application suitable for further testing and eventual production deployment, not a mockup with fake data.
+
+Acknowledge these requirements and begin Phase 1 only.
+```
+
+---
+
+## Phase 1 — Project Foundation and Firebase Setup
+
+```text
+Implement Phase 1: Project Foundation for True Fighters Martial Arts Academy.
+
+First inspect the current workspace. Preserve any existing working code.
+
+OBJECTIVES
+1. Establish the Flutter project structure for Android and Flutter Web.
+2. Configure the application name as True Fighters Martial Arts Academy.
+3. Create a consistent theme with reusable colors, typography, buttons, form fields, cards, and navigation components.
+4. Create separate folders for models, repositories, services, screens, widgets, routing, and utilities.
+5. Add Firebase initialization using generated Firebase configuration.
+6. Add environment and configuration documentation without committing secrets.
+7. Create initial Firestore collection documentation and security-rule templates.
+8. Add linting, formatting guidance, and initial automated tests.
+9. Create a professional welcome screen and basic navigation shell.
+10. Ensure responsive layouts for mobile and desktop.
+
+INITIAL DATA MODEL DOCUMENTATION
+Plan the following collections:
+- branches
+- users
+- admissionRequests
+- students
+- programs
+- batches
+- classSessions
+- attendance
+- feePlans
+- feeInvoices
+- payments
+- progressRecords
+- certificates
+- videos
+- announcements
+- auditLogs
+
+Use document IDs, createdAt, updatedAt, and branchId where appropriate. Define relationships and allowed fields before implementing the collections.
+
+SECURITY
+- Start with deny-by-default Firestore rules.
+- Never deploy permissive rules that allow unrestricted reads or writes.
+- Do not expose personal data publicly.
+- Document how Firebase Emulator Suite tests will be run.
+
+ACCEPTANCE CRITERIA
+- The project structure is clear and maintainable.
+- Android and web targets are documented.
+- Firebase setup instructions are accurate.
+- The application has a working initial screen.
+- No fake Firebase configuration is presented as real.
+- Tests and analysis are run if the environment supports them.
+
+Implement Phase 1 now. Report changed files, commands, test results, and any setup I must complete manually.
+```
+
+## Phase 2 — Authentication and Role-Based Access
+
+```text
+Implement Phase 2: Authentication and Role-Based Access.
+
+Inspect the existing project and extend it without removing Phase 1 functionality.
+
+FEATURES
+1. Email/password sign-in.
+2. Sign-up or registration request flow, with account activation controlled by the appropriate process.
+3. Phone-number OTP sign-in using Firebase Authentication.
+4. Password reset.
+5. Sign-out.
+6. Authentication state persistence.
+7. Loading, validation, network-error, and authentication-error states.
+8. Protected routes and role-specific dashboards.
+9. Account status handling: pending, active, suspended, and inactive as appropriate.
+10. Clear handling for missing or invalid user profiles.
+
+ROLES
+- student
+- coach
+- admin
+
+USER PROFILE
+Create a consistent users/{uid} profile schema with:
+- uid
+- displayName
+- email, when available
+- phone, when available
+- role
+- status
+- branchIds or an equivalent controlled branch-assignment structure
+- createdAt
+- updatedAt
+
+SECURITY REQUIREMENTS
+- Never let a user assign themselves the admin role.
+- Never trust role or branch information supplied only by the client.
+- Enforce protected access using Firestore Security Rules and trusted backend logic.
+- A missing profile must not grant access.
+- Suspended or inactive accounts must be blocked from protected features.
+- Avoid exposing Firebase authentication errors in ways that reveal sensitive account information.
+
+UI
+Create login, registration-request, OTP verification, password reset, and role-specific home screens. Keep the screens consistent with Phase 1.
+
+TESTS
+Test authentication state transitions, role routing, missing profiles, inactive accounts, and unauthorized access.
+
+Implement Phase 2. List the Firebase console configuration I must complete and report actual test results.
+```
+
+## Phase 3 — Multi-Branch Management
+
+```text
+Implement Phase 3: Multi-Branch Management.
+
+Preserve Phases 1 and 2.
+
+OBJECTIVES
+Create a complete branch management workflow for authorized administrators.
+
+BRANCH FIELDS
+- branchId
+- branchName
+- branchCode
+- address
+- city
+- state
+- postalCode
+- contactPhone
+- contactEmail
+- status: active or inactive
+- createdAt
+- updatedAt
+- createdBy
+
+FEATURES
+1. Create a branch.
+2. View a paginated branch list.
+3. Search and filter branches.
+4. View branch details.
+5. Edit branch information.
+6. Activate or deactivate a branch.
+7. Assign coaches and administrators to authorized branches.
+8. Associate students, batches, schedules, attendance, invoices, and reports with the correct branch.
+9. Allow an authorized administrator to select a branch when managing records.
+10. Display the active branch clearly in the UI.
+
+AUTHORIZATION
+- Global administrators may manage branches only if explicitly granted that permission.
+- Branch-level administrators must not automatically gain global administrative access.
+- Coaches must only see assigned branches.
+- Students must only see their own authorized branch information.
+- Branch switching must never bypass backend authorization.
+- Prevent unauthorized reassignment of branchId.
+- Define safe behavior when a branch is deactivated.
+
+DATA INTEGRITY
+Validate branch codes and required fields. Prevent accidental duplicate branch codes using a reliable backend-enforced strategy. Use server timestamps and audit important changes.
+
+TESTS
+Test cross-branch access attempts, unauthorized branch edits, inactive branches, role restrictions, and branch assignment changes.
+
+Implement the actual UI, models, repositories, backend operations, rules, and tests. Do not use placeholder branch data as the final implementation.
+```
+
+## Phase 4 — Student Registration and Management
+
+```text
+Implement Phase 4: Student Registration and Management.
+
+Preserve all earlier phases.
+
+STUDENT REGISTRATION
+Create a registration form containing:
+- Full name
+- Date of birth
+- Contact number
+- Email, where available
+- Address, where required
+- Selected branch
+- Martial arts program
+- Emergency contact name and number
+- Guardian name and contact details when applicable
+- Registration date
+- Relevant consent confirmations
+
+Collect only the information needed for the academy's operations. Apply appropriate safeguards for minors.
+
+WORKFLOW
+1. A prospective student submits a registration request.
+2. Validate required fields and contact details.
+3. Save the request as pending.
+4. Notify authorized staff when appropriate.
+5. An authorized administrator reviews the request.
+6. The administrator approves or rejects it, with an optional reason.
+7. On approval, create or activate the appropriate student record without duplicating records.
+8. Associate the student with the correct branch and program.
+9. Provide a student profile view and controlled editing.
+10. Support authorized student status changes.
+
+ADMIN FEATURES
+- Search and filter registration requests.
+- Filter by branch and status.
+- View registration details.
+- Approve or reject requests.
+- View active and inactive students.
+- Update permitted student fields.
+- Export student information only through authorized, privacy-conscious workflows.
+
+SECURITY
+- Students must not approve their own registration.
+- Do not allow a user to change their own role or branch assignment.
+- Prevent unauthorized access to guardian and emergency-contact information.
+- Apply server-side validation and authorization.
+- Maintain an audit trail for approvals and sensitive updates.
+
+TESTS
+Cover duplicate submissions, approval, rejection, missing fields, branch isolation, unauthorized edits, and minor-related consent workflows.
+
+Implement Phase 4 using real Firebase-backed data and clear UI states.
+```
+
+## Phase 5 — Programs, Batches, Schedules and Attendance
+
+```text
+Implement Phase 5: Programs, Batches, Class Schedules and Attendance.
+
+Preserve all existing features.
+
+PROGRAMS
+Create management for program name, description, level, duration, branch availability, and status.
+
+BATCHES
+Include:
+- Batch name
+- Branch ID
+- Program ID
+- Assigned coach IDs
+- Student membership
+- Capacity
+- Schedule details
+- Status
+
+SCHEDULES
+Allow authorized staff to:
+1. Create and edit class sessions.
+2. Assign a session to a branch, batch, and coach.
+3. Set date, start time, end time, and timezone.
+4. View daily, weekly, and monthly schedules.
+5. Handle cancellations and rescheduling.
+6. Detect scheduling conflicts where practical.
+
+ATTENDANCE
+Allow authorized coaches or administrators to:
+- Open a class session.
+- View the eligible students for that batch.
+- Mark present, absent, late, or excused.
+- Record attendance against the correct session and student.
+- Correct a record only with permission.
+- Record the person who created or modified the attendance entry.
+- View attendance history and basic attendance summaries.
+
+SECURITY AND INTEGRITY
+- Coaches can manage attendance only for assigned batches or sessions.
+- Students can view only their own attendance.
+- Prevent duplicate attendance entries for the same student and session.
+- Validate that the student belongs to the relevant batch.
+- Use trusted timestamps and auditable corrections.
+- Do not allow client-side branch selection to override authorization.
+
+TESTS
+Test session creation, scheduling conflicts, attendance duplication, unauthorized attendance changes, and cross-branch access.
+
+Implement the screens, data models, repositories, backend validation, security rules, and tests.
+```
+
+## Phase 6 — Fees, Invoices and Payments
+
+```text
+Implement Phase 6: Fees, Invoices and Payment Management.
+
+Preserve all previous functionality.
+
+FEE MANAGEMENT
+Allow authorized administrators to:
+- Create fee plans.
+- Configure one-time or recurring fees.
+- Assign fee plans to applicable students or programs.
+- Create invoices with due dates.
+- Record discounts or adjustments through authorized workflows.
+- View outstanding balances and overdue invoices.
+
+PAYMENT METHODS
+Support:
+1. Manual payments recorded by authorized staff, including payment method, amount, transaction reference, date, and receipt reference.
+2. Online payments using Razorpay, subject to merchant account setup and approval.
+
+PAYMENT DATA
+Use integer paise for monetary amounts. Include:
+- paymentId
+- studentId
+- branchId
+- invoiceId
+- amountPaise
+- currency
+- method
+- status
+- providerOrderId, where applicable
+- providerPaymentId, where applicable
+- createdAt
+- updatedAt
+
+PAYMENT SECURITY
+- Never mark an invoice paid based only on a client-side success screen.
+- Create online orders through a trusted backend function.
+- Verify payment signatures on the backend.
+- Verify payment status using trusted provider information.
+- Validate webhook signatures.
+- Handle duplicate webhooks and repeated requests idempotently.
+- Do not expose secret keys in Flutter or web client code.
+- Prevent a payment from being applied to the wrong student or invoice.
+- Keep an auditable record of payment reversals and authorized corrections.
+- Define how partial payments, overpayments, failed payments, refunds, and expired orders are handled.
+
+STUDENT FEATURES
+- View invoices.
+- View outstanding balances.
+- Initiate online payment.
+- View payment history.
+- Access receipts when payment is verified.
+
+ADMIN FEATURES
+- View payments and outstanding invoices.
+- Filter by branch, student, status, and date.
+- Record manual payments.
+- Reconcile payment records.
+- Generate basic fee reports.
+
+TESTS
+Test amount validation, duplicate webhook delivery, failed payments, signature verification, unauthorized manual payment entry, and invoice balance calculations.
+
+Implement the backend and UI. If Razorpay credentials or webhook configuration are unavailable, implement the secure integration structure and clearly document the required setup. Do not simulate real payment success.
+```
+
+## Phase 7 — Belt Progress, Certificates and Training Videos
+
+```text
+Implement Phase 7: Training Progress, Belt Ranks, Certificates and Videos.
+
+Preserve all existing features.
+
+BELT AND PROGRESS MANAGEMENT
+- Define configurable belt ranks and progression rules.
+- Record student assessment results.
+- Store awarded rank, assessment date, coach or assessor, and notes.
+- Maintain a chronological progress history.
+- Restrict rank awards and edits to authorized staff.
+- Allow students to view their own progress.
+
+CERTIFICATES
+- Generate certificates for authorized achievements.
+- Include certificate number, student name, achievement, issue date, and issuer.
+- Store certificate files securely.
+- Allow authorized students to view or download their own certificates.
+- Prevent unauthorized creation, alteration, or issuance.
+- Provide a verification mechanism that does not expose unnecessary personal data.
+
+TRAINING VIDEOS
+- Allow authorized staff to publish training videos or approved external video links.
+- Organize content by program, level, belt rank, or topic.
+- Provide title, description, thumbnail, and publication status.
+- Control access based on role, branch, and intended audience.
+- Avoid public storage URLs for restricted videos.
+- Use appropriate media hosting and access controls for large files.
+- Include a report or moderation workflow for inappropriate content.
+
+PRIVACY
+- Protect students' personal information and images.
+- Require appropriate authorization and consent for media featuring minors.
+- Do not make student videos or certificates publicly accessible by default.
+
+TESTS
+Test permission checks, rank history, certificate access, unauthorized issuance, and restricted video access.
+
+Implement the real workflows, UI, backend operations, security rules, and documentation.
+```
+
+## Phase 8 — Complete Admin Dashboard and Reports
+
+```text
+Implement Phase 8: Complete Admin Dashboard and Reporting.
+
+Preserve all earlier phases and use real authorized Firebase data.
+
+DASHBOARD
+Create a responsive admin dashboard with:
+- Total active students
+- Student registration requests awaiting review
+- Active branches
+- Active coaches
+- Upcoming classes
+- Attendance summaries
+- Outstanding fees
+- Verified payment summaries
+- Recent administrative activity
+
+BRANCH FILTERING
+- Provide branch-specific dashboard views.
+- Restrict branch selection according to the administrator's permissions.
+- Ensure dashboard totals exclude records the current user is not authorized to see.
+- Do not rely on hidden UI controls as the security boundary.
+
+ADMIN MODULES
+Provide navigation for:
+- Branches
+- Students
+- Coaches and user access
+- Programs and batches
+- Class schedules
+- Attendance
+- Fee plans and invoices
+- Payments
+- Belt progress
+- Certificates
+- Training videos
+- Announcements
+- Reports
+- Audit logs
+
+REPORTS
+Create practical filters and reports for:
+- Student enrollment
+- Attendance by date range and branch
+- Outstanding invoices
+- Verified payments
+- Student progression
+- Class and batch utilization
+
+Export features must respect the same authorization rules as on-screen data. Avoid exposing sensitive personal information in unnecessary exports.
+
+QUALITY
+- Use pagination for large collections.
+- Add search, filters, sorting, loading indicators, empty states, and error states.
+- Avoid loading entire collections into memory.
+- Use efficient Firestore queries and document any required indexes.
+- Keep the dashboard responsive on desktop and tablet screens.
+
+TESTS
+Test report calculations, date filtering, branch isolation, pagination, and role-specific dashboard access.
+
+Implement the actual dashboard and reports rather than a static mockup.
+```
+
+## Phase 9 — Notifications, Security Review and End-to-End Testing
+
+```text
+Implement Phase 9: Notifications, Security Review and Comprehensive Testing.
+
+Preserve the full application.
+
+NOTIFICATIONS
+Use Firebase Cloud Messaging and trusted backend logic for relevant events, including:
+- Registration submitted or reviewed
+- Upcoming class reminders
+- Schedule changes and cancellations
+- Attendance-related updates, where appropriate
+- Invoice creation and due-date reminders
+- Verified payment confirmations
+- Belt promotion and certificate issuance
+- Important branch announcements
+
+NOTIFICATION REQUIREMENTS
+- Respect user role, branch assignment, notification preferences, and consent.
+- Do not include sensitive personal or financial information in push-notification text.
+- Prevent unauthorized users from sending administrative notifications.
+- Avoid duplicate notifications for repeated events.
+- Handle invalid or expired device tokens.
+- Provide in-app announcement history where appropriate.
+
+SECURITY REVIEW
+Review:
+- Firebase Authentication
+- Firestore Security Rules
+- Firebase Storage Rules
+- Cloud Functions authorization
+- Role and branch assignment
+- Student registration approval
+- Attendance edits
+- Manual and online payment flows
+- Certificate and video access
+- Data exports
+- Audit logs
+- Secrets and environment configuration
+- Protection of minors' information
+
+TESTING
+Add or improve:
+- Unit tests
+- Widget tests
+- Repository and service tests
+- Firestore Emulator Security Rules tests
+- Cloud Functions tests
+- Authentication and role-routing tests
+- Cross-branch authorization tests
+- Payment verification and idempotency tests
+- Critical end-to-end workflow tests
+
+Use Firebase Emulator Suite where practical. Do not use production student data for testing.
+
+Fix the issues you can reproduce. Clearly distinguish tests that passed, failed, or could not be run.
+
+Deliver a security review report listing each issue, its severity, its remediation, and any remaining risk.
+```
+
+## Phase 10 — Production Readiness and Launch
+
+```text
+Implement Phase 10: Production Readiness and Launch Preparation.
+
+Review the entire True Fighters Martial Arts Academy application from Phase 1 through Phase 9.
+
+Do not add major new features until existing functionality, security, and tests have been reviewed.
+
+ANDROID RELEASE
+- Configure the app name, icon, package identifier, and release settings.
+- Document Android signing and secure key management.
+- Configure appropriate permissions.
+- Review network, authentication, and storage security.
+- Build a release APK or Android App Bundle if the environment supports it.
+- Document the installation and internal-testing procedure.
+
+WEB ADMIN RELEASE
+- Configure the production build.
+- Document Firebase Hosting or another supported hosting option.
+- Configure environment-specific settings.
+- Verify authenticated access and role-based routing.
+- Ensure the admin dashboard is not publicly accessible to unauthorized users.
+
+FIREBASE PRODUCTION SETUP
+- Separate development, testing, and production environments.
+- Configure Authentication providers.
+- Deploy reviewed Firestore and Storage rules.
+- Deploy required indexes and Cloud Functions.
+- Configure FCM.
+- Configure payment provider keys and webhooks through secure server-side configuration.
+- Configure billing alerts, usage limits, backups, and monitoring as appropriate.
+- Never overwrite production data during deployment.
+
+FINAL QA
+Verify these workflows:
+1. Student registration and approval.
+2. Login and role-based access.
+3. Branch creation and branch assignment.
+4. Program and batch creation.
+5. Class scheduling and attendance.
+6. Invoice generation and manual payments.
+7. Online payment verification, when configured.
+8. Belt progression and certificate issuance.
+9. Video and announcement access.
+10. Notifications.
+11. Admin reports.
+12. Unauthorized access attempts.
+
+DELIVERABLES
+Provide:
+- Final project structure
+- Setup instructions
+- Required environment variables and configuration names, without secrets
+- Firebase deployment instructions
+- Android build instructions
+- Web deployment instructions
+- Database schema documentation
+- Security Rules documentation
+- Backup and recovery guidance
+- Test report
+- Known limitations and unresolved issues
+- Production launch checklist
+
+Do not claim that the app is production-ready merely because the code was generated. Identify every item that still requires a real Firebase project, payment credentials, device testing, external review, or manual configuration.
+
+Complete the final review and provide a clear launch-readiness assessment.
+```
+
+---
+
+## How to use these prompts
+
+1. Open [Google AI Studio](https://aistudio.google.com/).
+2. Start a project or open your existing project.
+3. Paste the **Master Prompt** first.
+4. Paste **Phase 1** and let AI Studio implement it.
+5. Review the generated files and fix errors before proceeding.
+6. Paste each subsequent phase prompt separately, from Phase 2 through Phase 10.
+7. Keep a copy of the code after every completed phase, preferably in GitHub.
+8. Never add real student records or payment credentials to prompts.
+
+### Before moving to the next phase, use this review prompt
+
+```text
+Review the phase you just implemented.
+
+Do not add new features yet.
+
+1. Inspect all changed files and identify missing or incomplete functionality.
+2. Check for compile errors, type errors, dependency problems, and broken imports.
+3. Run available static analysis and automated tests.
+4. Verify that Firebase authorization is enforced by backend logic and security rules, not only by the UI.
+5. Check that all existing features from previous phases still work.
+6. Fix issues that you can reproduce.
+7. List any configuration or manual steps still required.
+8. Report the actual test results and remaining limitations.
+
+Do not claim a test passed unless it was actually run successfully.
+```
+
+**My recommendation:** Complete Phases 1–3 first and verify authentication, branch isolation, and security rules before entering real student information. These are foundational to every later feature, especially attendance, fees, and payments.

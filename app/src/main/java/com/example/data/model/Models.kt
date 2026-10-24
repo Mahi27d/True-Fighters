@@ -1,0 +1,395 @@
+package com.example.data.model
+
+import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentId
+import com.google.firebase.firestore.IgnoreExtraProperties
+import com.google.firebase.firestore.ServerTimestamp
+
+@IgnoreExtraProperties
+data class Branch(
+    @DocumentId val id: String = "",
+    val branchId: String = "",
+    val name: String = "",
+    val branchName: String = "",
+    val code: String = "",
+    val branchCode: String = "",
+    val address: String = "",
+    val city: String = "",
+    val state: String = "",
+    val postalCode: String = "",
+    val phone: String = "",
+    val contactPhone: String = "",
+    val status: String = "active", // "active", "inactive"
+    val active: Boolean = true,
+    val createdBy: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { branchId }
+    val effectiveName: String get() = branchName.ifBlank { name }
+    val effectiveCode: String get() = branchCode.ifBlank { code }
+    val effectivePhone: String get() = contactPhone.ifBlank { phone }
+    val isBranchActive: Boolean get() = active && status.lowercase() != "inactive"
+}
+
+@IgnoreExtraProperties
+data class UserProfile(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val displayName: String = "",
+    val email: String = "",
+    val phoneNumber: String = "",
+    val role: String = "student", // "student", "coach", "admin"
+    val status: String = "active", // "pending", "approved", "active", "suspended", "inactive"
+    val branchIds: List<String> = emptyList(),
+    val batchIds: List<String> = emptyList(),
+    val active: Boolean = true,
+    val isMinor: Boolean = false,
+    val dateOfBirth: String = "",
+    val guardianName: String = "",
+    val guardianPhone: String = "",
+    val guardianConsent: Boolean = false,
+    val preferredBranchId: String = "",
+    val preferredBranchName: String = "",
+    val programName: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+sealed class RoleValidationResult {
+    data class Success(val profile: UserProfile, val effectiveRole: String) : RoleValidationResult()
+    data class RoleMismatch(val assignedRole: String, val message: String) : RoleValidationResult()
+    data class AccountInactive(val message: String) : RoleValidationResult()
+    data class AccountSuspended(val message: String) : RoleValidationResult()
+    data class RegistrationPending(val profile: UserProfile, val message: String) : RoleValidationResult()
+    data class NeedsRegistration(val phoneNumber: String, val userId: String) : RoleValidationResult()
+    data class Unregistered(val message: String) : RoleValidationResult()
+    data class Error(val message: String) : RoleValidationResult()
+}
+
+@IgnoreExtraProperties
+data class AdminRecord(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val displayName: String = "",
+    val email: String = "",
+    val phoneNumber: String = "",
+    val scope: String = "global", // "global" or "branch"
+    val branchIds: List<String> = emptyList(),
+    val active: Boolean = true,
+    val provisionedBy: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class AdmissionRequest(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val fullName: String = "",
+    val email: String = "",
+    val phoneNumber: String = "",
+    val dateOfBirth: String = "",
+    val isMinor: Boolean = false,
+    val programId: String = "",
+    val programName: String = "",
+    val preferredBranchId: String = "",
+    val preferredBranchName: String = "",
+    val preferredBatchId: String = "",
+    val guardianName: String = "",
+    val guardianPhone: String = "",
+    val guardianConsent: Boolean = false,
+    val status: String = "pending", // "pending", "approved", "rejected"
+    val reviewedBy: String = "",
+    val rejectionReason: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val reviewedAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class Student(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val branchId: String = "",
+    val branchName: String = "",
+    val batchId: String = "",
+    val batchName: String = "",
+    val programId: String = "",
+    val programName: String = "",
+    val fullName: String = "",
+    val phoneNumber: String = "",
+    val email: String = "",
+    val dateOfBirth: String = "",
+    val isMinor: Boolean = false,
+    val guardianName: String = "",
+    val guardianPhone: String = "",
+    val guardianConsent: Boolean = false,
+    val joinDate: String = "",
+    val currentBelt: String = "White Belt",
+    val status: String = "active", // "active", "inactive", "suspended"
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class Program(
+    @DocumentId val id: String = "",
+    val programId: String = "",
+    val name: String = "",
+    val programName: String = "",
+    val description: String = "",
+    val discipline: String = "", // "Karate", "Taekwondo", "Kickboxing", "MMA", "Boxing", "Self Defense"
+    val level: String = "All Levels", // "Beginner", "Intermediate", "Advanced", "All Levels"
+    val category: String = "",
+    val branchIds: List<String> = emptyList(), // branches where this program is offered
+    val status: String = "active", // "active", "inactive"
+    val active: Boolean = true,
+    val createdBy: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { programId }
+    val effectiveName: String get() = programName.ifBlank { name }
+    val isProgramActive: Boolean get() = active && status.lowercase() != "inactive"
+}
+
+@IgnoreExtraProperties
+data class Batch(
+    @DocumentId val id: String = "",
+    val batchId: String = "",
+    val branchId: String = "",
+    val branchName: String = "",
+    val programId: String = "",
+    val programName: String = "",
+    val coachId: String = "",
+    val coachName: String = "",
+    val coachIds: List<String> = emptyList(),
+    val coachNames: List<String> = emptyList(),
+    val studentIds: List<String> = emptyList(),
+    val name: String = "",
+    val batchName: String = "",
+    val schedule: String = "", // e.g. "Mon, Wed, Fri - 5:00 PM to 6:30 PM"
+    val capacity: Long = 30L,
+    val status: String = "active", // "active", "inactive"
+    val active: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { batchId }
+    val effectiveName: String get() = batchName.ifBlank { name }
+    val effectiveCoachIds: List<String> get() = if (coachIds.isNotEmpty()) coachIds else if (coachId.isNotBlank()) listOf(coachId) else emptyList()
+    val isBatchActive: Boolean get() = active && status.lowercase() != "inactive"
+    val enrolledCount: Int get() = studentIds.size
+    val availableCapacity: Long get() = (capacity - enrolledCount).coerceAtLeast(0L)
+}
+
+@IgnoreExtraProperties
+data class ClassSession(
+    @DocumentId val id: String = "",
+    val sessionId: String = "",
+    val branchId: String = "",
+    val branchName: String = "",
+    val batchId: String = "",
+    val batchName: String = "",
+    val programId: String = "",
+    val programName: String = "",
+    val coachId: String = "",
+    val coachName: String = "",
+    val coachIds: List<String> = emptyList(),
+    val coachNames: List<String> = emptyList(),
+    val sessionDate: String = "", // "YYYY-MM-DD"
+    val startTime: String = "", // "HH:mm" e.g. "17:00"
+    val endTime: String = "", // "HH:mm" e.g. "18:30"
+    val date: String = "", // fallback for sessionDate
+    val timeSlot: String = "", // fallback e.g. "17:00 - 18:30"
+    val status: String = "scheduled", // "scheduled", "in_progress", "completed", "cancelled"
+    val capacity: Long = 30L,
+    val timezone: String = "Asia/Kolkata",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { sessionId }
+    val effectiveDate: String get() = sessionDate.ifBlank { date }
+    val effectiveTimeSlot: String get() = if (timeSlot.isNotBlank()) timeSlot else "$startTime - $endTime"
+    val effectiveCoachIds: List<String> get() = if (coachIds.isNotEmpty()) coachIds else if (coachId.isNotBlank()) listOf(coachId) else emptyList()
+}
+
+@IgnoreExtraProperties
+data class Attendance(
+    @DocumentId val id: String = "", // deterministic: sessionId_studentId
+    val branchId: String = "",
+    val sessionId: String = "",
+    val batchId: String = "",
+    val studentId: String = "",
+    val studentUserId: String = "",
+    val studentName: String = "",
+    val date: String = "",
+    val status: String = "present", // "present", "absent", "late", "excused"
+    val markedBy: String = "",
+    val correctionHistory: List<Map<String, String>> = emptyList(),
+    @ServerTimestamp val markedAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class FeePlan(
+    @DocumentId val id: String = "",
+    val planId: String = "",
+    val branchId: String = "",
+    val branchName: String = "",
+    val branchIds: List<String> = emptyList(),
+    val programId: String = "",
+    val programName: String = "",
+    val name: String = "",
+    val planName: String = "",
+    val description: String = "",
+    val amountPaise: Long = 250000L, // in paise (e.g. ₹2,500.00 = 250000)
+    val billingPeriod: String = "Monthly", // "Monthly", "Quarterly", "Annual"
+    val billingFrequency: String = "Monthly",
+    val dueDay: Int = 10, // Due day of month (e.g., 5th or 10th)
+    val status: String = "active", // "active", "inactive"
+    val active: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { planId }
+    val effectiveName: String get() = planName.ifBlank { name }
+    val effectiveFrequency: String get() = billingFrequency.ifBlank { billingPeriod }
+    val isPlanActive: Boolean get() = active && status.lowercase() != "inactive"
+}
+
+@IgnoreExtraProperties
+data class InvoiceItem(
+    val title: String = "",
+    val amountPaise: Long = 0L
+)
+
+@IgnoreExtraProperties
+data class FeeInvoice(
+    @DocumentId val id: String = "",
+    val invoiceId: String = "",
+    val invoiceNumber: String = "",
+    val branchId: String = "",
+    val branchName: String = "",
+    val studentId: String = "",
+    val studentUserId: String = "",
+    val studentName: String = "",
+    val feePlanId: String = "",
+    val feePlanName: String = "",
+    val period: String = "", // e.g. "November 2026"
+    val itemizedItems: List<InvoiceItem> = emptyList(),
+    val amountPaise: Long = 0L,
+    val paidPaise: Long = 0L,
+    val dueDate: String = "", // "YYYY-MM-DD"
+    val status: String = "pending", // "pending", "partially_paid", "paid", "overdue", "refunded"
+    val paymentIds: List<String> = emptyList(),
+    val notes: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { invoiceId }
+    val effectiveStatus: String get() = status.lowercase().trim()
+    val balancePaise: Long get() = (amountPaise - paidPaise).coerceAtLeast(0L)
+    val isPaid: Boolean get() = effectiveStatus == "paid" || (amountPaise > 0 && paidPaise >= amountPaise)
+    val isOverdue: Boolean get() = effectiveStatus == "overdue"
+}
+
+@IgnoreExtraProperties
+data class Payment(
+    @DocumentId val id: String = "",
+    val paymentId: String = "",
+    val paymentNumber: String = "",
+    val branchId: String = "",
+    val branchName: String = "",
+    val invoiceId: String = "",
+    val studentId: String = "",
+    val studentUserId: String = "",
+    val studentName: String = "",
+    val amountPaise: Long = 0L,
+    val paymentDate: String = "", // "YYYY-MM-DD"
+    val method: String = "cash", // "cash", "bank_transfer", "upi", "online"
+    val providerReference: String = "", // e.g. UTR number, bank txn ID, receipt number
+    val status: String = "verified", // "pending", "verified", "failed", "refunded"
+    val recordedBy: String = "",
+    val notes: String = "",
+    val auditLog: List<Map<String, String>> = emptyList(),
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val verifiedAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { paymentId }
+    val effectiveDate: String get() = paymentDate.ifBlank { verifiedAt?.toDate()?.toString() ?: "" }
+}
+
+@IgnoreExtraProperties
+data class ProgressRecord(
+    @DocumentId val id: String = "",
+    val branchId: String = "",
+    val studentId: String = "",
+    val studentUserId: String = "",
+    val studentName: String = "",
+    val discipline: String = "",
+    val rank: String = "", // e.g. "Yellow Belt", "Green Belt", "Brown Belt", "Black Belt 1st Dan"
+    val assessmentDate: String = "",
+    val skillNotes: String = "",
+    val coachId: String = "",
+    val coachName: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class Certificate(
+    @DocumentId val id: String = "",
+    val branchId: String = "",
+    val studentId: String = "",
+    val studentUserId: String = "",
+    val studentName: String = "",
+    val title: String = "",
+    val discipline: String = "",
+    val grade: String = "",
+    val storagePath: String = "",
+    val issuedAt: String = "",
+    val issuedBy: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class Video(
+    @DocumentId val id: String = "",
+    val title: String = "",
+    val description: String = "",
+    val category: String = "Techniques", // "Techniques", "Warmups", "Fitness", "Self Defense", "Forms"
+    val videoUrl: String = "",
+    val durationText: String = "10 mins",
+    val branchIds: List<String> = emptyList(),
+    val accessLevel: String = "All", // "All", "Beginner", "Advanced"
+    val published: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    val createdBy: String = ""
+)
+
+@IgnoreExtraProperties
+data class Announcement(
+    @DocumentId val id: String = "",
+    val title: String = "",
+    val message: String = "",
+    val priority: String = "Normal", // "Normal", "Important", "Urgent"
+    val branchIds: List<String> = emptyList(),
+    val targetBatchIds: List<String> = emptyList(),
+    val publishedByName: String = "Head Dojo Master",
+    @ServerTimestamp val publishedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class AuditLog(
+    @DocumentId val id: String = "",
+    val actorId: String = "",
+    val actorName: String = "",
+    val action: String = "",
+    val targetType: String = "",
+    val targetId: String = "",
+    val branchId: String = "",
+    val details: String = "",
+    @ServerTimestamp val timestamp: Timestamp? = null
+)

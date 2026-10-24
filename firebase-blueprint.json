@@ -1,0 +1,333 @@
+{
+  "entities": {
+    "Branch": {
+      "title": "Branch",
+      "description": "True Fighters Academy branch location",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "code", "active", "createdAt", "updatedAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile document keyed by auth UID",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "coach", "admin"] },
+        "branchIds": { "type": "array" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "email", "role", "active", "createdAt", "updatedAt"]
+    },
+    "AdmissionRequest": {
+      "title": "AdmissionRequest",
+      "description": "Student admission application request",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "programId": { "type": "string" },
+        "preferredBranchId": { "type": "string" },
+        "preferredBatchId": { "type": "string" },
+        "guardianName": { "type": "string" },
+        "guardianPhone": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "reviewedBy": { "type": "string" },
+        "reviewedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "email", "phoneNumber", "programId", "preferredBranchId", "status", "createdAt"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Enrolled academy student record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "branchId": { "type": "string" },
+        "batchId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "dateOfBirth": { "type": "string" },
+        "guardianName": { "type": "string" },
+        "guardianPhone": { "type": "string" },
+        "joinDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive", "suspended"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "branchId", "fullName", "status", "createdAt", "updatedAt"]
+    },
+    "Program": {
+      "title": "Program",
+      "description": "Martial arts training program (e.g. Karate, Taekwondo, Kickboxing)",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "discipline": { "type": "string" },
+        "level": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "discipline", "active"]
+    },
+    "Batch": {
+      "title": "Batch",
+      "description": "Scheduled training batch under a program and branch",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "programId": { "type": "string" },
+        "coachId": { "type": "string" },
+        "name": { "type": "string" },
+        "schedule": { "type": "string" },
+        "capacity": { "type": "integer" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["branchId", "programId", "name", "schedule", "active"]
+    },
+    "ClassSession": {
+      "title": "ClassSession",
+      "description": "Individual scheduled or conducted training class session",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "batchId": { "type": "string" },
+        "coachId": { "type": "string" },
+        "startAt": { "type": "string", "format": "date-time" },
+        "endAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["scheduled", "in_progress", "completed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["branchId", "batchId", "coachId", "status", "createdAt"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "Session attendance marked for a student",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentUserId": { "type": "string" },
+        "status": { "type": "string", "enum": ["present", "absent", "late", "excused"] },
+        "markedBy": { "type": "string" },
+        "markedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["branchId", "sessionId", "studentId", "studentUserId", "status", "markedBy", "markedAt"]
+    },
+    "FeePlan": {
+      "title": "FeePlan",
+      "description": "Configured fee package for courses",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "name": { "type": "string" },
+        "amountPaise": { "type": "integer" },
+        "billingPeriod": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["branchId", "name", "amountPaise", "billingPeriod", "active"]
+    },
+    "FeeInvoice": {
+      "title": "FeeInvoice",
+      "description": "Monthly or periodic fee billing invoice for a student",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentUserId": { "type": "string" },
+        "feePlanId": { "type": "string" },
+        "period": { "type": "string" },
+        "amountPaise": { "type": "integer" },
+        "paidPaise": { "type": "integer" },
+        "dueDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["unpaid", "partially_paid", "paid", "overdue"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["branchId", "studentId", "studentUserId", "amountPaise", "status", "createdAt", "updatedAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Payment transaction receipt (Cash, UPI, Gateway)",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentUserId": { "type": "string" },
+        "amountPaise": { "type": "integer" },
+        "method": { "type": "string", "enum": ["cash", "upi", "bank_transfer", "online"] },
+        "providerReference": { "type": "string" },
+        "status": { "type": "string", "enum": ["initiated", "verified", "failed", "refunded"] },
+        "recordedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "verifiedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["branchId", "invoiceId", "studentId", "studentUserId", "amountPaise", "method", "status", "createdAt"]
+    },
+    "ProgressRecord": {
+      "title": "ProgressRecord",
+      "description": "Martial arts rank, belt level, and coach assessment",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentUserId": { "type": "string" },
+        "discipline": { "type": "string" },
+        "rank": { "type": "string" },
+        "assessmentDate": { "type": "string" },
+        "skillNotes": { "type": "string" },
+        "coachId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["branchId", "studentId", "studentUserId", "discipline", "rank", "createdAt"]
+    },
+    "Certificate": {
+      "title": "Certificate",
+      "description": "Student achievement certificate record",
+      "type": "object",
+      "properties": {
+        "branchId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentUserId": { "type": "string" },
+        "title": { "type": "string" },
+        "storagePath": { "type": "string" },
+        "issuedAt": { "type": "string" },
+        "issuedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["branchId", "studentId", "studentUserId", "title", "issuedAt"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Training and technique video guide",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "branchIds": { "type": "array" },
+        "accessLevel": { "type": "string" },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["title", "category", "videoUrl", "published", "createdAt"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Academy notices and broadcast updates",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "branchIds": { "type": "array" },
+        "targetBatchIds": { "type": "array" },
+        "publishedAt": { "type": "string", "format": "date-time" },
+        "publishedBy": { "type": "string" }
+      },
+      "required": ["title", "message", "publishedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System administrative audit trail",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string" },
+        "action": { "type": "string" },
+        "targetType": { "type": "string" },
+        "targetId": { "type": "string" },
+        "branchId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "details": { "type": "string" }
+      },
+      "required": ["actorId", "action", "targetType", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/branches/{branchId}": {
+      "schema": { "$ref": "#/entities/Branch" },
+      "description": "Academy branch locations"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles"
+    },
+    "/admissionRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/AdmissionRequest" },
+      "description": "Public admission inquiries and requests"
+    },
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Active student academy registrations"
+    },
+    "/programs/{programId}": {
+      "schema": { "$ref": "#/entities/Program" },
+      "description": "Academy martial arts programs"
+    },
+    "/batches/{batchId}": {
+      "schema": { "$ref": "#/entities/Batch" },
+      "description": "Batches with class schedules"
+    },
+    "/classSessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ClassSession" },
+      "description": "Conducted or upcoming class sessions"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": { "$ref": "#/entities/Attendance" },
+      "description": "Attendance entries"
+    },
+    "/feePlans/{feePlanId}": {
+      "schema": { "$ref": "#/entities/FeePlan" },
+      "description": "Fee plans"
+    },
+    "/feeInvoices/{invoiceId}": {
+      "schema": { "$ref": "#/entities/FeeInvoice" },
+      "description": "Fee billing invoices"
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "Payment records"
+    },
+    "/progressRecords/{progressId}": {
+      "schema": { "$ref": "#/entities/ProgressRecord" },
+      "description": "Martial arts belt and assessment records"
+    },
+    "/certificates/{certificateId}": {
+      "schema": { "$ref": "#/entities/Certificate" },
+      "description": "Student certificates"
+    },
+    "/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/Video" },
+      "description": "Curated training videos"
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Academy notifications and news"
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Administrative audit log entries"
+    }
+  }
+}

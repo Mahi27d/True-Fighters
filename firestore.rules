@@ -1,0 +1,322 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasAdminDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function adminDoc() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    function isBootstrapAdminToken() {
+      return isSignedIn() && (
+        request.auth.token.get('email', '') in ['Mahi27d@gmail.com', 'mahi27d@gmail.com'] ||
+        request.auth.token.get('phone_number', '') == '+919876500001'
+      );
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        isBootstrapAdminToken() ||
+        (hasAdminDoc() && adminDoc().get('active', true) == true)
+      );
+    }
+
+    function isGlobalAdmin() {
+      return isSignedIn() && (
+        isBootstrapAdminToken() ||
+        (hasAdminDoc() &&
+         adminDoc().get('active', true) == true &&
+         (adminDoc().get('scope', 'global') == 'global' || adminDoc().get('branchIds', []).size() == 0))
+      );
+    }
+
+    function isBranchAdminFor(branchId) {
+      return isAdmin() && (
+        isGlobalAdmin() ||
+        (hasAdminDoc() && branchId is string && branchId.size() > 0 && branchId in adminDoc().get('branchIds', []))
+      );
+    }
+
+    function isCoach() {
+      return isSignedIn() && (
+        isAdmin() ||
+        (hasUserDoc() &&
+         userDoc().get('role', '') == 'coach' &&
+         userDoc().get('status', 'active') in ['active', 'approved'] &&
+         userDoc().get('active', true) == true)
+      );
+    }
+
+    function isCoachForBranch(branchId) {
+      return isBranchAdminFor(branchId) || (
+        hasUserDoc() &&
+        userDoc().get('role', '') == 'coach' &&
+        userDoc().get('status', 'active') in ['active', 'approved'] &&
+        userDoc().get('active', true) == true &&
+        branchId is string &&
+        branchId.size() > 0 &&
+        branchId in userDoc().get('branchIds', [])
+      );
+    }
+
+    // Admins registry
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow create: if isGlobalAdmin() || (
+        isSignedIn() &&
+        request.auth.uid == adminId &&
+        isBootstrapAdminToken()
+      );
+      allow update, delete: if isGlobalAdmin();
+    }
+
+    // Branches
+    match /branches/{branchId} {
+      allow read: if isSignedIn();
+      allow create: if isBranchAdminFor(branchId) &&
+        incoming().get('name', '') is string && incoming().get('name', '').size() > 0 &&
+        incoming().get('code', '') is string && incoming().get('code', '').size() > 0 &&
+        incoming().get('status', 'active') in ['active', 'inactive'];
+      allow update: if isBranchAdminFor(branchId) &&
+        incoming().get('name', '') is string && incoming().get('name', '').size() > 0 &&
+        incoming().get('code', '') is string && incoming().get('code', '').size() > 0 &&
+        incoming().get('status', 'active') in ['active', 'inactive'];
+      allow delete: if isGlobalAdmin();
+    }
+
+    // Users
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isCoach());
+      allow list: if isAdmin() || isCoach();
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId &&
+         incoming().get('role', '') == 'student' &&
+         incoming().get('status', 'active') in ['pending', 'active', 'inactive']) ||
+        isAdmin()
+      );
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          request.auth.uid == userId &&
+          resource != null &&
+          incoming().get('role', '') == existing().get('role', '') &&
+          incoming().get('status', 'active') == existing().get('status', 'active') &&
+          incoming().get('branchIds', []) == existing().get('branchIds', []) &&
+          incoming().get('batchIds', []) == existing().get('batchIds', []) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phoneNumber', 'email', 'dateOfBirth', 'guardianName', 'guardianPhone', 'guardianConsent', 'updatedAt'])
+        )
+      );
+      allow delete: if isGlobalAdmin();
+    }
+
+    // Admission Requests
+    match /admissionRequests/{requestId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        resource.data.get('userId', '') == request.auth.uid ||
+        resource.data.get('email', '') == request.auth.token.get('email', '') ||
+        isBranchAdminFor(resource.data.get('preferredBranchId', ''))
+      );
+      allow list: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.get('userId', '') == request.auth.uid
+      );
+      allow create: if isSignedIn() &&
+        incoming().get('fullName', '') is string && incoming().get('fullName', '').size() > 0 &&
+        incoming().get('preferredBranchId', '') is string && incoming().get('preferredBranchId', '').size() > 0 &&
+        incoming().get('status', 'pending') == 'pending';
+      allow update: if isBranchAdminFor(existing().get('preferredBranchId', '')) &&
+        incoming().get('status', '') in ['pending', 'approved', 'rejected'];
+      allow delete: if isGlobalAdmin();
+    }
+
+    // Students
+    match /students/{studentId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        resource.data.get('userId', '') == request.auth.uid ||
+        isCoachForBranch(resource.data.get('branchId', '')) ||
+        isBranchAdminFor(resource.data.get('branchId', ''))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('userId', '') == request.auth.uid ||
+        isCoach() ||
+        isAdmin()
+      );
+      allow create: if isBranchAdminFor(incoming().get('branchId', '')) &&
+        incoming().get('branchId', '') is string && incoming().get('branchId', '').size() > 0 &&
+        incoming().get('fullName', '') is string && incoming().get('fullName', '').size() > 0;
+      allow update: if isBranchAdminFor(existing().get('branchId', '')) &&
+        isBranchAdminFor(incoming().get('branchId', '')) &&
+        incoming().get('branchId', '') is string && incoming().get('branchId', '').size() > 0 &&
+        incoming().get('fullName', '') is string && incoming().get('fullName', '').size() > 0;
+      allow delete: if isGlobalAdmin();
+    }
+
+    // Programs
+    match /programs/{programId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Batches
+    match /batches/{batchId} {
+      allow read: if isSignedIn();
+      allow create, update: if (isBranchAdminFor(incoming().get('branchId', '')) || isCoachForBranch(incoming().get('branchId', ''))) &&
+        incoming().get('branchId', '') is string && incoming().get('branchId', '').size() > 0 &&
+        ((incoming().get('name', '') is string && incoming().get('name', '').size() > 0) ||
+         (incoming().get('batchName', '') is string && incoming().get('batchName', '').size() > 0));
+      allow delete: if isBranchAdminFor(existing().get('branchId', ''));
+    }
+
+    // Class Sessions
+    match /classSessions/{sessionId} {
+      allow read: if isSignedIn();
+      allow create, update: if (isBranchAdminFor(incoming().get('branchId', '')) || isCoachForBranch(incoming().get('branchId', ''))) &&
+        incoming().get('branchId', '') is string && incoming().get('branchId', '').size() > 0 &&
+        incoming().get('batchId', '') is string && incoming().get('batchId', '').size() > 0;
+      allow delete: if isBranchAdminFor(existing().get('branchId', ''));
+    }
+
+    // Attendance
+    match /attendance/{attendanceId} {
+      allow get: if isSignedIn() && (
+        (resource == null && (isCoach() || isAdmin())) ||
+        (resource != null && (
+          resource.data.get('studentUserId', '') == request.auth.uid ||
+          isCoachForBranch(resource.data.get('branchId', '')) ||
+          isBranchAdminFor(resource.data.get('branchId', ''))
+        ))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('studentUserId', '') == request.auth.uid ||
+        isCoach() ||
+        isAdmin()
+      );
+      allow create, update: if (isBranchAdminFor(incoming().get('branchId', '')) || isCoachForBranch(incoming().get('branchId', ''))) &&
+        incoming().get('branchId', '') is string && incoming().get('branchId', '').size() > 0 &&
+        incoming().get('batchId', '') is string && incoming().get('batchId', '').size() > 0 &&
+        incoming().get('studentId', '') is string && incoming().get('studentId', '').size() > 0 &&
+        incoming().get('status', '') in ['present', 'absent', 'late', 'excused'];
+      allow delete: if isBranchAdminFor(existing().get('branchId', ''));
+    }
+
+    // Fee Plans
+    match /feePlans/{feePlanId} {
+      allow read: if isSignedIn();
+      allow create, update: if isAdmin();
+      allow delete: if isGlobalAdmin();
+    }
+
+    // Fee Invoices
+    match /feeInvoices/{invoiceId} {
+      allow get: if isSignedIn() && (
+        (resource == null && isAdmin()) ||
+        (resource != null && (
+          resource.data.get('studentUserId', '') == request.auth.uid ||
+          isBranchAdminFor(resource.data.get('branchId', ''))
+        ))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('studentUserId', '') == request.auth.uid ||
+        isAdmin()
+      );
+      allow create, update: if isBranchAdminFor(incoming().get('branchId', ''));
+      allow delete: if isGlobalAdmin();
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow get: if isSignedIn() && (
+        (resource == null && isAdmin()) ||
+        (resource != null && (
+          resource.data.get('studentUserId', '') == request.auth.uid ||
+          isBranchAdminFor(resource.data.get('branchId', ''))
+        ))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('studentUserId', '') == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isSignedIn() && (
+        incoming().get('studentUserId', '') == request.auth.uid ||
+        isBranchAdminFor(incoming().get('branchId', ''))
+      );
+      allow update, delete: if isBranchAdminFor(existing().get('branchId', ''));
+    }
+
+    // Progress Records
+    match /progressRecords/{progressId} {
+      allow get: if isSignedIn() && (
+        resource.data.get('studentUserId', '') == request.auth.uid ||
+        isCoachForBranch(resource.data.get('branchId', '')) ||
+        isBranchAdminFor(resource.data.get('branchId', ''))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('studentUserId', '') == request.auth.uid ||
+        isCoach() ||
+        isAdmin()
+      );
+      allow create, update: if (isBranchAdminFor(incoming().get('branchId', '')) || isCoachForBranch(incoming().get('branchId', ''))) &&
+        incoming().get('branchId', '') is string && incoming().get('branchId', '').size() > 0;
+      allow delete: if isBranchAdminFor(existing().get('branchId', ''));
+    }
+
+    // Certificates
+    match /certificates/{certificateId} {
+      allow get: if isSignedIn() && (
+        resource.data.get('studentUserId', '') == request.auth.uid ||
+        isBranchAdminFor(resource.data.get('branchId', ''))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('studentUserId', '') == request.auth.uid ||
+        isAdmin()
+      );
+      allow write: if isAdmin();
+    }
+
+    // Videos
+    match /videos/{videoId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Announcements
+    match /announcements/{announcementId} {
+      allow read: if isSignedIn();
+      allow write: if isCoach() || isAdmin();
+    }
+
+    // Audit Logs
+    match /auditLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

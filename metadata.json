@@ -1,0 +1,6 @@
+{
+  "name": "True Fighters",
+  "description": "True Fighters Martial Arts Academy multi-branch management application for students, coaches, and administrators.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
