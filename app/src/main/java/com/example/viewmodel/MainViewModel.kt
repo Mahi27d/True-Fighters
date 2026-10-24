@@ -56,7 +56,13 @@ class MainViewModel(val repository: TrueFightersRepository) : ViewModel() {
     val certificates: StateFlow<List<Certificate>> = repository.observeCertificates()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
-    val videos: StateFlow<List<Video>> = repository.observeVideos()
+    val beltRanks: StateFlow<List<BeltRank>> = repository.observeBeltRanks()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val gradingAssessments: StateFlow<List<GradingAssessment>> = repository.observeGradingAssessments()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
+    val videos: StateFlow<List<Video>> = repository.observeVideos(includeUnpublished = true)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     val announcements: StateFlow<List<Announcement>> = repository.observeAnnouncements()
@@ -322,6 +328,63 @@ class MainViewModel(val repository: TrueFightersRepository) : ViewModel() {
     fun refundPayment(paymentId: String, reason: String = "", onResult: (Result<Unit>) -> Unit = {}) {
         viewModelScope.launch {
             val res = repository.refundPayment(paymentId, reason)
+            onResult(res)
+        }
+    }
+
+    // Phase 7 Actions
+    fun createOrUpdateBeltRank(beltRank: BeltRank, onResult: (Result<String>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.createOrUpdateBeltRank(beltRank)
+            onResult(res)
+        }
+    }
+
+    fun toggleBeltRankStatus(rankId: String, currentActive: Boolean, onResult: (Result<Unit>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.setBeltRankStatus(rankId, !currentActive)
+            onResult(res)
+        }
+    }
+
+    fun submitGradingAssessment(assessment: GradingAssessment, onResult: (Result<String>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.submitGradingAssessment(assessment)
+            onResult(res)
+        }
+    }
+
+    fun approveGradingAssessment(assessmentId: String, adminNotes: String = "", onResult: (Result<Certificate>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.approveGradingAssessment(assessmentId, adminNotes)
+            onResult(res)
+        }
+    }
+
+    fun rejectGradingAssessment(assessmentId: String, reason: String = "", onResult: (Result<Unit>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.rejectGradingAssessment(assessmentId, reason)
+            onResult(res)
+        }
+    }
+
+    fun createOrUpdateVideo(video: Video, onResult: (Result<String>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.createOrUpdateVideo(video)
+            onResult(res)
+        }
+    }
+
+    fun toggleVideoPublished(videoId: String, currentPublished: Boolean, onResult: (Result<Unit>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.setVideoPublished(videoId, !currentPublished)
+            onResult(res)
+        }
+    }
+
+    fun deleteVideo(videoId: String, onResult: (Result<Unit>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.deleteVideo(videoId)
             onResult(res)
         }
     }

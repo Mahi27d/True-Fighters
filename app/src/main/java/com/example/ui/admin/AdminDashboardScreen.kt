@@ -44,6 +44,10 @@ fun AdminDashboardScreen(
     coaches: List<UserProfile> = emptyList(),
     attendanceList: List<Attendance> = emptyList(),
     feePlans: List<FeePlan> = emptyList(),
+    beltRanks: List<BeltRank> = emptyList(),
+    gradingAssessments: List<GradingAssessment> = emptyList(),
+    certificates: List<Certificate> = emptyList(),
+    videos: List<Video> = emptyList(),
     adminProfile: UserProfile? = null,
     onAddBranch: (Branch) -> Unit,
     onUpdateBranch: (Branch) -> Unit = {},
@@ -70,6 +74,13 @@ fun AdminDashboardScreen(
     onManageBatchStudent: (batchId: String, studentId: String, action: String, targetBatchId: String?) -> Unit = { _, _, _, _ -> },
     onCreateSession: (ClassSession) -> Unit = {},
     onRescheduleOrCancelSession: (sessionId: String, newDate: String?, newStart: String?, newEnd: String?, status: String?, reason: String) -> Unit = { _, _, _, _, _, _ -> },
+    onApproveGrading: (assessmentId: String, adminNotes: String) -> Unit = { _, _ -> },
+    onRejectGrading: (assessmentId: String, reason: String) -> Unit = { _, _ -> },
+    onCreateBeltRank: (BeltRank) -> Unit = {},
+    onToggleBeltRankStatus: (rankId: String, currentActive: Boolean) -> Unit = { _, _ -> },
+    onCreateVideo: (Video) -> Unit = {},
+    onToggleVideoPublished: (videoId: String, currentPublished: Boolean) -> Unit = { _, _ -> },
+    onDeleteVideo: (videoId: String) -> Unit = {},
     onSignOut: () -> Unit
 ) {
     var selectedBranchId by remember { mutableStateOf("all") }
@@ -163,6 +174,23 @@ fun AdminDashboardScreen(
                 Tab(selected = selectedTab == 7, onClick = { selectedTab = 7 }, text = { Text("Batches (${batches.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
                 Tab(selected = selectedTab == 8, onClick = { selectedTab = 8 }, text = { Text("Schedule (${classSessions.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
                 Tab(selected = selectedTab == 9, onClick = { selectedTab = 9 }, text = { Text("Attendance Reports", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
+                val pendingAssessmentsCount = remember(gradingAssessments) { gradingAssessments.count { it.isPending } }
+                Tab(
+                    selected = selectedTab == 10,
+                    onClick = { selectedTab = 10 },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Belts & Gradings", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            if (pendingAssessmentsCount > 0) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Surface(shape = CircleShape, color = RedPrimary) {
+                                    Text(text = "$pendingAssessmentsCount", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                }
+                            }
+                        }
+                    }
+                )
+                Tab(selected = selectedTab == 11, onClick = { selectedTab = 11 }, text = { Text("Videos (${videos.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
             }
 
             when (selectedTab) {
@@ -252,6 +280,25 @@ fun AdminDashboardScreen(
                 9 -> AdminAttendanceReportsTab(
                     attendanceList = attendanceList,
                     branches = authorizedBranches
+                )
+                10 -> AdminBeltAndCertificatesTab(
+                    branches = authorizedBranches,
+                    programs = programs,
+                    beltRanks = beltRanks,
+                    gradingAssessments = gradingAssessments,
+                    certificates = certificates,
+                    selectedBranchId = selectedBranchId,
+                    onApproveGrading = onApproveGrading,
+                    onRejectGrading = onRejectGrading,
+                    onCreateBeltRank = onCreateBeltRank,
+                    onToggleBeltRankStatus = onToggleBeltRankStatus
+                )
+                11 -> AdminVideosTab(
+                    programs = programs,
+                    videos = videos,
+                    onCreateVideo = onCreateVideo,
+                    onTogglePublish = onToggleVideoPublished,
+                    onDeleteVideo = onDeleteVideo
                 )
             }
         }

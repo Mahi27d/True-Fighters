@@ -55,6 +55,8 @@ fun StudentDashboardScreen(
     progressRecords: List<ProgressRecord>,
     certificates: List<Certificate>,
     videos: List<Video>,
+    beltRanks: List<BeltRank> = emptyList(),
+    gradingAssessments: List<GradingAssessment> = emptyList(),
     announcements: List<Announcement>,
     onPayInvoice: (Payment) -> Unit,
     onSignOut: () -> Unit
@@ -62,6 +64,7 @@ fun StudentDashboardScreen(
     var selectedTab by remember { mutableStateOf(StudentTab.OVERVIEW) }
     var payingInvoice by remember { mutableStateOf<FeeInvoice?>(null) }
     var viewingPaymentReceipt by remember { mutableStateOf<Payment?>(null) }
+    var viewingCertificate by remember { mutableStateOf<Certificate?>(null) }
     var viewingVideo by remember { mutableStateOf<Video?>(null) }
     var selectedVideoCategory by remember { mutableStateOf("All") }
 
@@ -150,9 +153,13 @@ fun StudentDashboardScreen(
                 StudentTab.PROGRESS -> StudentProgressTab(
                     student = currentStudent,
                     progressRecords = progressRecords,
-                    certificates = certificates
+                    certificates = certificates,
+                    beltRanks = beltRanks,
+                    gradingAssessments = gradingAssessments,
+                    onViewCertificate = { viewingCertificate = it }
                 )
                 StudentTab.VIDEOS -> StudentVideosTab(
+                    student = currentStudent,
                     videos = videos,
                     selectedCategory = selectedVideoCategory,
                     onCategorySelect = { selectedVideoCategory = it },
@@ -187,6 +194,87 @@ fun StudentDashboardScreen(
         VideoPlayerDialog(
             video = vid,
             onDismiss = { viewingVideo = null }
+        )
+    }
+
+    // Certificate Dialog
+    viewingCertificate?.let { cert ->
+        AlertDialog(
+            onDismissRequest = { viewingCertificate = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(imageVector = Icons.Default.WorkspacePremium, contentDescription = null, tint = GoldBelt)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Official Academy Certificate")
+                }
+            },
+            text = {
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(2.dp, GoldBelt, RoundedCornerShape(12.dp)),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "TRUE FIGHTERS MARTIAL ARTS ACADEMY",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = RedPrimary
+                        )
+                        Text(text = "Branch: ${cert.branchName}", fontSize = 11.sp, color = TextMuted)
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(text = cert.title, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(text = "This certifies that", fontSize = 12.sp, color = TextMuted)
+                        Text(
+                            text = cert.studentName,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(text = "has successfully attained the rank of", fontSize = 12.sp, color = TextMuted)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        BeltBadge(rank = cert.effectiveBelt)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(text = "in ${cert.effectiveProgram}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text(text = "Certificate #:", fontSize = 10.sp, color = TextMuted)
+                                Text(text = cert.effectiveNumber, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = GoldBelt)
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(text = "Verification Code:", fontSize = 10.sp, color = TextMuted)
+                                Text(text = cert.verificationCode.ifBlank { "VREF-AUTHENTIC" }, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(text = "Date: ${cert.issuedAt}", fontSize = 11.sp, color = TextMuted)
+                            Text(text = "Signed: ${cert.issuedBy}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewingCertificate = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = RedPrimary)
+                ) {
+                    Text("Close")
+                }
+            }
         )
     }
 }
@@ -827,9 +915,33 @@ private fun StudentFeesTab(
 private fun StudentProgressTab(
     student: Student,
     progressRecords: List<ProgressRecord>,
-    certificates: List<Certificate>
+    certificates: List<Certificate>,
+    beltRanks: List<BeltRank> = emptyList(),
+    gradingAssessments: List<GradingAssessment> = emptyList(),
+    onViewCertificate: (Certificate) -> Unit = {}
 ) {
-    val beltSteps = listOf("White Belt", "Yellow Belt", "Orange Belt", "Green Belt", "Blue Belt", "Brown Belt", "Black Belt 1st Dan")
+    val studentProgramId = student.programId.ifBlank { "prog_karate" }
+    val programRanks = remember(beltRanks, studentProgramId) {
+        val filtered = beltRanks.filter { it.programId == studentProgramId }.sortedBy { it.rankOrder }
+        if (filtered.isNotEmpty()) filtered else listOf(
+            BeltRank(beltName = "White Belt", rankOrder = 1, syllabus = "Basics: Seiken Tsuki, Age Uke, Mae Geri"),
+            BeltRank(beltName = "Yellow Belt", rankOrder = 2, minClassesRequired = 24, minMonthsRequired = 2, syllabus = "Kata: Taikyoku Shodan. Strikes: Mawashi Geri"),
+            BeltRank(beltName = "Orange Belt", rankOrder = 3, minClassesRequired = 48, minMonthsRequired = 4, syllabus = "Kata: Heian Shodan. Basic Kumite"),
+            BeltRank(beltName = "Green Belt", rankOrder = 4, minClassesRequired = 72, minMonthsRequired = 6, syllabus = "Kata: Heian Nidan. Sparring timing"),
+            BeltRank(beltName = "Blue Belt", rankOrder = 5, minClassesRequired = 100, minMonthsRequired = 9, syllabus = "Kata: Heian Sandan. Controlled Kumite"),
+            BeltRank(beltName = "Brown Belt", rankOrder = 6, minClassesRequired = 140, minMonthsRequired = 12, syllabus = "Kata: Heian Godan, Tekki Shodan"),
+            BeltRank(beltName = "Black Belt 1st Dan", rankOrder = 7, minClassesRequired = 220, minMonthsRequired = 24, syllabus = "Kata: Bassai Dai, Kanku Dai. Mastery in Kumite")
+        )
+    }
+
+    val currentRankIndex = remember(programRanks, student.currentBelt) {
+        val idx = programRanks.indexOfFirst { it.beltName.equals(student.currentBelt, ignoreCase = true) }
+        if (idx >= 0) idx else 0
+    }
+
+    val myAssessments = remember(gradingAssessments, student.id, student.userId) {
+        gradingAssessments.filter { it.studentId == student.id || (student.userId.isNotBlank() && it.studentUserId == student.userId) }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -839,11 +951,16 @@ private fun StudentProgressTab(
     ) {
         item {
             Text(
-                text = "Martial Arts Progress & Ranks",
+                text = "Martial Arts Progress & Belt Journey",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Track your ranking ladder, upcoming belt requirements, and coach assessments",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
 
             // Belt Journey Progression Card
             Card(
@@ -852,33 +969,46 @@ private fun StudentProgressTab(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "True Fighters Belt Ladder",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${student.programName.ifBlank { "Karate" }} Curriculum",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        BeltBadge(rank = student.currentBelt)
+                    }
                     Spacer(modifier = Modifier.height(12.dp))
-                    beltSteps.forEachIndexed { index, belt ->
-                        val isAchieved = index <= 1 // demo: achieved first belts
+
+                    programRanks.forEachIndexed { index, rank ->
+                        val isAchieved = index <= currentRankIndex
+                        val isCurrent = index == currentRankIndex
+                        val isNext = index == currentRankIndex + 1
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(vertical = 4.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(20.dp)
+                                    .size(22.dp)
                                     .clip(CircleShape)
-                                    .background(if (isAchieved) SuccessGreen else Color.Gray.copy(alpha = 0.4f)),
+                                    .background(if (isAchieved) SuccessGreen else if (isNext) GoldBelt else Color.Gray.copy(alpha = 0.4f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isAchieved) {
                                     Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                } else if (isNext) {
+                                    Icon(imageVector = Icons.Default.TrendingUp, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                                 }
                             }
                             Spacer(modifier = Modifier.width(10.dp))
-                            BeltBadge(rank = belt)
+                            BeltBadge(rank = rank.beltName)
                             Spacer(modifier = Modifier.weight(1f))
-                            if (belt == student.currentBelt) {
+                            if (isCurrent) {
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
                                     color = RedPrimary
@@ -891,6 +1021,13 @@ private fun StudentProgressTab(
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
+                            } else if (isNext) {
+                                Text(
+                                    text = "NEXT GOAL (${rank.minClassesRequired} classes)",
+                                    color = GoldBelt,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
@@ -899,25 +1036,50 @@ private fun StudentProgressTab(
         }
 
         item {
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Coach Assessments & Feedback",
+                text = "Coach Assessments & Grading Reviews",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
         }
 
-        if (progressRecords.isEmpty()) {
+        if (myAssessments.isEmpty() && progressRecords.isEmpty()) {
             item {
                 Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(
-                            text = "Initial Assessment: Strong stance & good flexibility. Recommended for Yellow belt advancement exam next month.",
+                            text = "Initial Assessment: Good form & striking posture. Eligible for next belt grading exam after completing required classes.",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text(text = "By: Master Arvind Singh • 5th Dan", fontSize = 11.sp, color = GoldBelt, fontWeight = FontWeight.SemiBold)
+                        Text(text = "By: Master Arvind Singh • Chief Examiner", fontSize = 11.sp, color = GoldBelt, fontWeight = FontWeight.SemiBold)
                     }
+                }
+            }
+        }
+
+        items(myAssessments) { assess ->
+            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            BeltBadge(rank = assess.proposedBeltName)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = "Score: ${assess.score}/100", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        StatusBadge(status = assess.status)
+                    }
+                    if (assess.coachComments.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(text = assess.coachComments, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(text = "Examiner: ${assess.coachName} • ${assess.assessmentDate}", fontSize = 11.sp, color = GoldBelt)
                 }
             }
         }
@@ -941,7 +1103,7 @@ private fun StudentProgressTab(
         }
 
         item {
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = "Earned Certificates",
                 style = MaterialTheme.typography.titleMedium,
@@ -960,7 +1122,7 @@ private fun StudentProgressTab(
         }
 
         items(certificates) { cert ->
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+            Card(modifier = Modifier.fillMaxWidth().clickable { onViewCertificate(cert) }, shape = RoundedCornerShape(12.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -968,11 +1130,18 @@ private fun StudentProgressTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(text = cert.title, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text(text = "Discipline: ${cert.discipline} • Issued: ${cert.issuedAt}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.WorkspacePremium, contentDescription = null, tint = GoldBelt, modifier = Modifier.size(32.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(text = cert.title, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text(text = cert.effectiveNumber, fontSize = 12.sp, color = GoldBelt, fontWeight = FontWeight.SemiBold)
+                            Text(text = "Awarded: ${cert.effectiveBelt} • ${cert.issuedAt}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
-                    Icon(imageVector = Icons.Default.WorkspacePremium, contentDescription = null, tint = GoldBelt)
+                    OutlinedButton(onClick = { onViewCertificate(cert) }) {
+                        Text("View")
+                    }
                 }
             }
         }
@@ -981,13 +1150,14 @@ private fun StudentProgressTab(
 
 @Composable
 private fun StudentVideosTab(
+    student: Student,
     videos: List<Video>,
     selectedCategory: String,
     onCategorySelect: (String) -> Unit,
     onWatchVideo: (Video) -> Unit
 ) {
-    val categories = listOf("All", "Techniques", "Warmups", "Fitness", "Self Defense")
-    val filtered = if (selectedCategory == "All") videos else videos.filter { it.category == selectedCategory }
+    val categories = listOf("All", "Techniques", "Warmups", "Forms/Kata", "Sparring", "Self Defense")
+    val filtered = if (selectedCategory == "All") videos else videos.filter { it.category.equals(selectedCategory, ignoreCase = true) }
 
     LazyColumn(
         modifier = Modifier
@@ -1002,31 +1172,39 @@ private fun StudentVideosTab(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Official True Fighters syllabus & technique masterclasses",
+                text = "Official True Fighters syllabus & technique masterclasses for your discipline",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(10.dp))
 
             // Category Chips Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ScrollableTabRow(
+                selectedTabIndex = categories.indexOf(selectedCategory).coerceAtLeast(0),
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = RedPrimary,
+                edgePadding = 8.dp
             ) {
                 categories.forEach { cat ->
                     val isSelected = cat == selectedCategory
-                    FilterChip(
+                    Tab(
                         selected = isSelected,
                         onClick = { onCategorySelect(cat) },
-                        label = { Text(cat, fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = RedPrimary,
-                            selectedLabelColor = Color.White
-                        )
+                        text = { Text(cat, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     )
                 }
             }
             Spacer(modifier = Modifier.height(4.dp))
+        }
+
+        if (filtered.isEmpty()) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
+                    Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text("No training videos in this category.", color = TextMuted)
+                    }
+                }
+            }
         }
 
         items(filtered) { vid ->
@@ -1066,11 +1244,11 @@ private fun StudentVideosTab(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(text = "Instructor: ${vid.createdBy.ifBlank { "Master Arvind Singh" }}", fontSize = 11.sp, color = GoldBelt)
+                        Text(text = "Belt Level: ${vid.targetBelt}", fontSize = 11.sp, color = GoldBelt)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(imageVector = Icons.Default.PlayCircle, contentDescription = null, tint = RedPrimary, modifier = Modifier.size(20.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Watch", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RedPrimary)
+                            Text("Watch Drill", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RedPrimary)
                         }
                     }
                 }

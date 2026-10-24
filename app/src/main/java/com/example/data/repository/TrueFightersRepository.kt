@@ -1918,8 +1918,449 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
         id
     }
 
-    // Certificates
-    fun observeCertificates(studentUserId: String? = null): Flow<List<Certificate>> = callbackFlow {
+    // ==========================================
+    // PHASE 7: BELT RANKS & PROGRESSION
+    // ==========================================
+
+    fun observeBeltRanks(programId: String? = null, includeInactive: Boolean = false): Flow<List<BeltRank>> = callbackFlow {
+        var query: Query = db.collection("beltRanks")
+        if (!includeInactive) {
+            query = query.whereEqualTo("active", true)
+        }
+        val listener = query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                trySend(emptyList())
+                return@addSnapshotListener
+            }
+            val list = snapshot?.toObjects(BeltRank::class.java) ?: emptyList()
+            val filtered = if (!programId.isNullOrBlank() && programId != "all") {
+                list.filter { it.programId == programId }
+            } else {
+                list
+            }.sortedBy { it.rankOrder }
+            trySend(filtered)
+        }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun getBeltRank(rankId: String): Result<BeltRank?> = runCatching {
+        if (rankId.isBlank()) return@runCatching null
+        val snap = db.collection("beltRanks").document(rankId).get().await()
+        if (snap.exists()) snap.toObject(BeltRank::class.java) else null
+    }
+
+    suspend fun createOrUpdateBeltRank(beltRank: BeltRank): Result<String> = runCatching {
+        val trimmedName = beltRank.beltName.trim()
+        if (trimmedName.isBlank()) {
+            throw IllegalArgumentException("Belt name cannot be blank.")
+        }
+        if (beltRank.programId.isBlank()) {
+            throw IllegalArgumentException("Program ID is required for a belt rank.")
+        }
+        if (beltRank.rankOrder < 1) {
+            throw IllegalArgumentException("Rank order must be at least 1.")
+        }
+        val id = if (beltRank.id.isNotBlank()) beltRank.id else if (beltRank.rankId.isNotBlank()) beltRank.rankId else "rank_${UUID.randomUUID().toString().take(8)}"
+        val data = mapOf(
+            "rankId" to id,
+            "programId" to beltRank.programId,
+            "programName" to beltRank.programName,
+            "beltName" to trimmedName,
+            "rankOrder" to beltRank.rankOrder,
+            "colorHex" to beltRank.colorHex.ifBlank { "#FFFFFF" },
+            "stripeCount" to beltRank.stripeCount,
+            "minClassesRequired" to beltRank.minClassesRequired,
+            "minMonthsRequired" to beltRank.minMonthsRequired,
+            "syllabus" to beltRank.syllabus,
+            "active" to beltRank.active,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        val docRef = db.collection("beltRanks").document(id)
+        val snap = docRef.get().await()
+        if (!snap.exists()) {
+            val initial = data.toMutableMap()
+            initial["createdAt"] = FieldValue.serverTimestamp()
+            docRef.set(initial).await()
+        } else {
+            docRef.set(data, SetOptions.merge()).await()
+        }
+        recordAuditLog(
+            action = "BELT_RANK_SAVED",
+            targetType = "beltRank",
+            targetId = id,
+            branchId = "",
+            details = "Configured belt rank $trimmedName (Order: ${beltRank.rankOrder}) for program ${beltRank.programName}"
+        )
+        id
+    }
+
+    suspend fun setBeltRankStatus(rankId: String, active: Boolean): Result<Unit> = runCatching {
+        if (rankId.isBlank()) throw IllegalArgumentException("Belt rank ID cannot be blank.")
+        db.collection("beltRanks").document(rankId).update(
+            mapOf(
+                "active" to active,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        recordAuditLog(
+            action = if (active) "BELT_RANK_ACTIVATED" else "BELT_RANK_DEACTIVATED",
+            targetType = "beltRank",
+            targetId = rankId,
+            branchId = "",
+            details = "Set belt rank $rankId active status to $active"
+        )
+    }
+
+    // ==========================================
+    // PHASE 7: GRADING ASSESSMENTS & PROMOTIONS
+    // ==========================================
+
+    fun observeGradingAssessments(
+        studentUserId: String? = null,
+        branchId: String? = null,
+        status: String? = null
+    ): Flow<List<GradingAssessment>> = callbackFlow {
+        var query: Query = db.collection("gradingAssessments")
+        if (!studentUserId.isNullOrBlank()) {
+            query = query.whereEqualTo("studentUserId", studentUserId)
+        }
+        val listener = query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                trySend(emptyList())
+                return@addSnapshotListener
+            }
+            var list = snapshot?.toObjects(GradingAssessment::class.java) ?: emptyList()
+            if (!branchId.isNullOrBlank() && branchId != "all") {
+                list = list.filter { it.branchId == branchId }
+            }
+            if (!status.isNullOrBlank() && status != "all") {
+                list = list.filter { it.status.lowercase() == status.lowercase() }
+            }
+            trySend(list.sortedByDescending { it.assessmentDate })
+        }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun getGradingAssessment(assessmentId: String): Result<GradingAssessment?> = runCatching {
+        if (assessmentId.isBlank()) return@runCatching null
+        val snap = db.collection("gradingAssessments").document(assessmentId).get().await()
+        if (snap.exists()) snap.toObject(GradingAssessment::class.java) else null
+    }
+
+    suspend fun submitGradingAssessment(assessment: GradingAssessment): Result<String> = runCatching {
+        if (assessment.studentId.isBlank()) {
+            throw IllegalArgumentException("Student ID is required for grading assessment.")
+        }
+        if (assessment.branchId.isBlank()) {
+            throw IllegalArgumentException("Branch ID is required.")
+        }
+        if (assessment.proposedBeltName.isBlank()) {
+            throw IllegalArgumentException("Proposed belt name is required.")
+        }
+
+        // Validate branch is active
+        val branchSnap = db.collection("branches").document(assessment.branchId).get().await()
+        if (!branchSnap.exists() || branchSnap.getBoolean("active") == false) {
+            throw IllegalArgumentException("Branch ${assessment.branchId} is inactive or does not exist.")
+        }
+
+        // Validate student exists and is active
+        val stdSnap = db.collection("students").document(assessment.studentId).get().await()
+        if (!stdSnap.exists()) {
+            throw IllegalArgumentException("Student ${assessment.studentId} not found.")
+        }
+        val stdStatus = stdSnap.getString("status") ?: "active"
+        if (stdStatus.lowercase() == "suspended" || stdStatus.lowercase() == "inactive") {
+            throw IllegalArgumentException("Cannot submit assessment for $stdStatus student.")
+        }
+
+        val studentBranchId = stdSnap.getString("branchId") ?: ""
+        if (studentBranchId.isNotBlank() && studentBranchId != assessment.branchId) {
+            throw IllegalArgumentException("Student belongs to branch $studentBranchId, but assessment was submitted for branch ${assessment.branchId}.")
+        }
+
+        // Validate coach authorization for branch (if actor is coach)
+        val currentUid = auth.currentUser?.uid ?: ""
+        if (currentUid.isNotBlank()) {
+            val userSnap = db.collection("users").document(currentUid).get().await()
+            if (userSnap.exists()) {
+                val role = userSnap.getString("role")?.lowercase() ?: ""
+                if (role == "coach") {
+                    val coachBranchIds = (userSnap.get("branchIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                    if (coachBranchIds.isNotEmpty() && !coachBranchIds.contains(assessment.branchId)) {
+                        throw IllegalAccessException("Coach is not authorized to submit assessments for branch ${assessment.branchId}.")
+                    }
+                }
+            }
+        }
+
+        // Progression validation: proposedRankOrder must be greater than currentRankOrder
+        val currentOrder = if (assessment.currentRankOrder > 0) assessment.currentRankOrder else 1
+        val proposedOrder = assessment.proposedRankOrder
+        if (proposedOrder <= currentOrder && assessment.proposedBeltName == assessment.currentBeltName) {
+            throw IllegalArgumentException("Proposed rank ($proposedOrder: ${assessment.proposedBeltName}) must be higher than current rank ($currentOrder: ${assessment.currentBeltName}).")
+        }
+
+        // Prevent duplicate pending assessment for the same student and target rank
+        val existingPending = db.collection("gradingAssessments")
+            .whereEqualTo("studentId", assessment.studentId)
+            .whereEqualTo("status", "pending_approval")
+            .get().await()
+        for (doc in existingPending.documents) {
+            val pendingProposed = doc.getString("proposedBeltName") ?: ""
+            if (pendingProposed.equals(assessment.proposedBeltName, ignoreCase = true)) {
+                throw IllegalStateException("A pending grading assessment already exists for ${assessment.studentName} for $pendingProposed.")
+            }
+        }
+
+        val id = if (assessment.id.isNotBlank()) assessment.id else if (assessment.assessmentId.isNotBlank()) assessment.assessmentId else "assess_${UUID.randomUUID().toString().take(8)}"
+        val coachName = assessment.coachName.ifBlank { auth.currentUser?.displayName ?: "Sensei" }
+
+        val data = mapOf(
+            "assessmentId" to id,
+            "studentId" to assessment.studentId,
+            "studentUserId" to assessment.studentUserId.ifBlank { stdSnap.getString("userId") ?: "" },
+            "studentName" to assessment.studentName.ifBlank { stdSnap.getString("fullName") ?: "Student" },
+            "programId" to assessment.programId.ifBlank { stdSnap.getString("programId") ?: "" },
+            "programName" to assessment.programName.ifBlank { stdSnap.getString("programName") ?: "" },
+            "branchId" to assessment.branchId,
+            "branchName" to assessment.branchName.ifBlank { branchSnap.getString("name") ?: "" },
+            "batchId" to assessment.batchId,
+            "currentBeltRankId" to assessment.currentBeltRankId,
+            "currentBeltName" to assessment.currentBeltName.ifBlank { stdSnap.getString("currentBelt") ?: "White Belt" },
+            "currentRankOrder" to currentOrder,
+            "proposedBeltRankId" to assessment.proposedBeltRankId,
+            "proposedBeltName" to assessment.proposedBeltName,
+            "proposedRankOrder" to proposedOrder,
+            "coachId" to assessment.coachId.ifBlank { currentUid },
+            "coachName" to coachName,
+            "assessmentDate" to assessment.assessmentDate.ifBlank { "2026-10-23" },
+            "score" to assessment.score,
+            "techniqueGrade" to assessment.techniqueGrade,
+            "kataOrFormsScore" to assessment.kataOrFormsScore,
+            "sparringScore" to assessment.sparringScore,
+            "status" to "pending_approval",
+            "coachComments" to assessment.coachComments,
+            "adminNotes" to "",
+            "approvedByAdminId" to "",
+            "approvedByAdminName" to "",
+            "approvedAt" to "",
+            "certificateId" to "",
+            "createdAt" to FieldValue.serverTimestamp(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        db.collection("gradingAssessments").document(id).set(data).await()
+
+        recordAuditLog(
+            action = "GRADING_ASSESSMENT_SUBMITTED",
+            targetType = "gradingAssessment",
+            targetId = id,
+            branchId = assessment.branchId,
+            details = "Coach $coachName submitted belt upgrade assessment for ${assessment.studentName}: ${assessment.currentBeltName} -> ${assessment.proposedBeltName}"
+        )
+        id
+    }
+
+    suspend fun approveGradingAssessment(assessmentId: String, adminNotes: String = ""): Result<Certificate> = runCatching {
+        if (assessmentId.isBlank()) throw IllegalArgumentException("Assessment ID cannot be blank.")
+        val assessRef = db.collection("gradingAssessments").document(assessmentId)
+        val assessSnap = assessRef.get().await()
+        if (!assessSnap.exists()) {
+            throw IllegalArgumentException("Grading assessment $assessmentId not found.")
+        }
+        val currentStatus = assessSnap.getString("status") ?: ""
+        if (currentStatus != "pending_approval") {
+            throw IllegalStateException("Cannot approve assessment with status '$currentStatus'. Only pending assessments can be approved.")
+        }
+
+        val branchId = assessSnap.getString("branchId") ?: ""
+        val studentId = assessSnap.getString("studentId") ?: ""
+        val studentUserId = assessSnap.getString("studentUserId") ?: ""
+        val studentName = assessSnap.getString("studentName") ?: "Student"
+        val programId = assessSnap.getString("programId") ?: ""
+        val programName = assessSnap.getString("programName") ?: "Martial Arts"
+        val proposedBelt = assessSnap.getString("proposedBeltName") ?: "Yellow Belt"
+        val proposedRankOrder = assessSnap.getLong("proposedRankOrder")?.toInt() ?: 2
+        val branchName = assessSnap.getString("branchName") ?: ""
+        val assessmentDate = assessSnap.getString("assessmentDate") ?: "2026-10-23"
+
+        val adminUid = auth.currentUser?.uid ?: ""
+        val adminName = auth.currentUser?.displayName ?: "Chief Administrator"
+
+        // Check admin authorization for branch
+        if (adminUid.isNotBlank()) {
+            val userSnap = db.collection("users").document(adminUid).get().await()
+            if (userSnap.exists()) {
+                val role = userSnap.getString("role")?.lowercase() ?: ""
+                if (role != "admin") {
+                    throw IllegalAccessException("Only authorized administrators can approve promotions.")
+                }
+                val adminBranchIds = (userSnap.get("branchIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                if (adminBranchIds.isNotEmpty() && !adminBranchIds.contains(branchId)) {
+                    throw IllegalAccessException("Admin is not authorized to approve promotions for branch $branchId.")
+                }
+            }
+        }
+
+        // Generate Certificate
+        val certId = "cert_${UUID.randomUUID().toString().take(8)}"
+        val cleanProgram = programId.removePrefix("prog_").take(6).uppercase()
+        val certNumber = "TF-CERT-$cleanProgram-${System.currentTimeMillis()}"
+        val verificationCode = "VREF-${UUID.randomUUID().toString().take(6).uppercase()}"
+
+        val certData = mapOf(
+            "certificateId" to certId,
+            "certificateNumber" to certNumber,
+            "branchId" to branchId,
+            "branchName" to branchName,
+            "studentId" to studentId,
+            "studentUserId" to studentUserId,
+            "studentName" to studentName,
+            "programId" to programId,
+            "programName" to programName,
+            "title" to "Certificate of Belt Advancement: $proposedBelt",
+            "discipline" to programName,
+            "grade" to proposedBelt,
+            "awardedBelt" to proposedBelt,
+            "rankOrder" to proposedRankOrder,
+            "assessmentId" to assessmentId,
+            "storagePath" to "",
+            "verificationCode" to verificationCode,
+            "issuedAt" to assessmentDate,
+            "issuedBy" to adminName,
+            "issuedByAdminId" to adminUid,
+            "status" to "issued",
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        db.collection("certificates").document(certId).set(certData).await()
+
+        // Update student record currentBelt
+        if (studentId.isNotBlank()) {
+            db.collection("students").document(studentId).update(
+                mapOf(
+                    "currentBelt" to proposedBelt,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+        }
+        if (studentUserId.isNotBlank()) {
+            val uRef = db.collection("users").document(studentUserId)
+            if (uRef.get().await().exists()) {
+                uRef.update(
+                    mapOf(
+                        "currentBelt" to proposedBelt,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+        }
+
+        // Update assessment doc to approved
+        assessRef.update(
+            mapOf(
+                "status" to "approved",
+                "approvedByAdminId" to adminUid,
+                "approvedByAdminName" to adminName,
+                "approvedAt" to assessmentDate,
+                "certificateId" to certId,
+                "adminNotes" to adminNotes,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+
+        recordAuditLog(
+            action = "PROMOTION_APPROVED",
+            targetType = "student",
+            targetId = studentId,
+            branchId = branchId,
+            details = "Admin $adminName approved promotion of $studentName to $proposedBelt. Certificate #$certNumber issued."
+        )
+
+        Certificate(
+            id = certId,
+            certificateId = certId,
+            certificateNumber = certNumber,
+            branchId = branchId,
+            branchName = branchName,
+            studentId = studentId,
+            studentUserId = studentUserId,
+            studentName = studentName,
+            programId = programId,
+            programName = programName,
+            title = "Certificate of Belt Advancement: $proposedBelt",
+            discipline = programName,
+            grade = proposedBelt,
+            awardedBelt = proposedBelt,
+            rankOrder = proposedRankOrder,
+            assessmentId = assessmentId,
+            verificationCode = verificationCode,
+            issuedAt = assessmentDate,
+            issuedBy = adminName,
+            issuedByAdminId = adminUid,
+            status = "issued"
+        )
+    }
+
+    suspend fun rejectGradingAssessment(assessmentId: String, reason: String = ""): Result<Unit> = runCatching {
+        if (assessmentId.isBlank()) throw IllegalArgumentException("Assessment ID cannot be blank.")
+        val assessRef = db.collection("gradingAssessments").document(assessmentId)
+        val assessSnap = assessRef.get().await()
+        if (!assessSnap.exists()) {
+            throw IllegalArgumentException("Grading assessment $assessmentId not found.")
+        }
+        val currentStatus = assessSnap.getString("status") ?: ""
+        if (currentStatus != "pending_approval") {
+            throw IllegalStateException("Cannot reject assessment with status '$currentStatus'. Only pending assessments can be rejected.")
+        }
+
+        val branchId = assessSnap.getString("branchId") ?: ""
+        val studentName = assessSnap.getString("studentName") ?: "Student"
+        val proposedBelt = assessSnap.getString("proposedBeltName") ?: ""
+        val adminUid = auth.currentUser?.uid ?: ""
+        val adminName = auth.currentUser?.displayName ?: "Chief Administrator"
+
+        // Check admin authorization
+        if (adminUid.isNotBlank()) {
+            val userSnap = db.collection("users").document(adminUid).get().await()
+            if (userSnap.exists()) {
+                val role = userSnap.getString("role")?.lowercase() ?: ""
+                if (role != "admin") {
+                    throw IllegalAccessException("Only authorized administrators can reject promotions.")
+                }
+                val adminBranchIds = (userSnap.get("branchIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                if (adminBranchIds.isNotEmpty() && !adminBranchIds.contains(branchId)) {
+                    throw IllegalAccessException("Admin is not authorized for branch $branchId.")
+                }
+            }
+        }
+
+        assessRef.update(
+            mapOf(
+                "status" to "rejected",
+                "approvedByAdminId" to adminUid,
+                "approvedByAdminName" to adminName,
+                "adminNotes" to reason,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+
+        recordAuditLog(
+            action = "PROMOTION_REJECTED",
+            targetType = "gradingAssessment",
+            targetId = assessmentId,
+            branchId = branchId,
+            details = "Admin $adminName rejected promotion of $studentName to $proposedBelt. Reason: $reason"
+        )
+    }
+
+    // ==========================================
+    // PHASE 7: CERTIFICATES
+    // ==========================================
+
+    fun observeCertificates(
+        studentUserId: String? = null,
+        branchId: String? = null
+    ): Flow<List<Certificate>> = callbackFlow {
         var query: Query = db.collection("certificates")
         if (!studentUserId.isNullOrBlank()) {
             query = query.whereEqualTo("studentUserId", studentUserId)
@@ -1929,42 +2370,188 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
                 trySend(emptyList())
                 return@addSnapshotListener
             }
-            trySend(snapshot?.toObjects(Certificate::class.java) ?: emptyList())
+            var list = snapshot?.toObjects(Certificate::class.java) ?: emptyList()
+            if (!branchId.isNullOrBlank() && branchId != "all") {
+                list = list.filter { it.branchId == branchId }
+            }
+            trySend(list.sortedByDescending { it.issuedAt })
         }
         awaitClose { listener.remove() }
+    }
+
+    suspend fun getCertificate(certificateId: String): Result<Certificate?> = runCatching {
+        if (certificateId.isBlank()) return@runCatching null
+        val snap = db.collection("certificates").document(certificateId).get().await()
+        if (snap.exists()) snap.toObject(Certificate::class.java) else null
+    }
+
+    suspend fun verifyCertificate(query: String): Result<Certificate?> = runCatching {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return@runCatching null
+        val byNumber = db.collection("certificates").whereEqualTo("certificateNumber", trimmed).get().await()
+        if (!byNumber.isEmpty) {
+            return@runCatching byNumber.documents.first().toObject(Certificate::class.java)
+        }
+        val byCode = db.collection("certificates").whereEqualTo("verificationCode", trimmed).get().await()
+        if (!byCode.isEmpty) {
+            return@runCatching byCode.documents.first().toObject(Certificate::class.java)
+        }
+        val byDocId = db.collection("certificates").document(trimmed).get().await()
+        if (byDocId.exists()) {
+            return@runCatching byDocId.toObject(Certificate::class.java)
+        }
+        null
     }
 
     suspend fun issueCertificate(certificate: Certificate): Result<String> = runCatching {
         val id = if (certificate.id.isNotBlank()) certificate.id else "cert_${UUID.randomUUID().toString().take(8)}"
         val data = mapOf(
+            "certificateId" to id,
+            "certificateNumber" to certificate.certificateNumber.ifBlank { "TF-CERT-${id.takeLast(6).uppercase()}" },
             "branchId" to certificate.branchId,
+            "branchName" to certificate.branchName,
             "studentId" to certificate.studentId,
             "studentUserId" to certificate.studentUserId,
             "studentName" to certificate.studentName,
+            "programId" to certificate.programId,
+            "programName" to certificate.programName,
             "title" to certificate.title,
             "discipline" to certificate.discipline,
             "grade" to certificate.grade,
+            "awardedBelt" to certificate.awardedBelt.ifBlank { certificate.grade },
+            "rankOrder" to certificate.rankOrder,
+            "assessmentId" to certificate.assessmentId,
             "storagePath" to certificate.storagePath,
+            "verificationCode" to certificate.verificationCode.ifBlank { "VREF-${UUID.randomUUID().toString().take(6).uppercase()}" },
             "issuedAt" to certificate.issuedAt,
-            "issuedBy" to (auth.currentUser?.displayName ?: "Head Master"),
+            "issuedBy" to (certificate.issuedBy.ifBlank { auth.currentUser?.displayName ?: "Chief Administrator" }),
+            "issuedByAdminId" to certificate.issuedByAdminId,
+            "status" to certificate.status,
             "createdAt" to FieldValue.serverTimestamp()
         )
         db.collection("certificates").document(id).set(data).await()
         id
     }
 
-    // Videos
-    fun observeVideos(): Flow<List<Video>> = callbackFlow {
-        val listener = db.collection("videos")
-            .whereEqualTo("published", true)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    trySend(emptyList())
-                    return@addSnapshotListener
-                }
-                trySend(snapshot?.toObjects(Video::class.java) ?: emptyList())
+    // ==========================================
+    // PHASE 7: TRAINING VIDEOS
+    // ==========================================
+
+    fun observeVideos(
+        programId: String? = null,
+        category: String? = null,
+        minBeltRank: Int? = null,
+        includeUnpublished: Boolean = false
+    ): Flow<List<Video>> = callbackFlow {
+        var query: Query = db.collection("videos")
+        if (!includeUnpublished) {
+            query = query.whereEqualTo("published", true)
+        }
+        val listener = query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                trySend(emptyList())
+                return@addSnapshotListener
             }
+            var list = snapshot?.toObjects(Video::class.java) ?: emptyList()
+            if (!programId.isNullOrBlank() && programId != "all") {
+                list = list.filter { it.programId.isBlank() || it.programId == programId }
+            }
+            if (!category.isNullOrBlank() && category != "All") {
+                list = list.filter { it.category.equals(category, ignoreCase = true) }
+            }
+            if (minBeltRank != null && minBeltRank > 0) {
+                list = list.filter { it.minRankOrder <= minBeltRank }
+            }
+            trySend(list)
+        }
         awaitClose { listener.remove() }
+    }
+
+    suspend fun getVideo(videoId: String): Result<Video?> = runCatching {
+        if (videoId.isBlank()) return@runCatching null
+        val snap = db.collection("videos").document(videoId).get().await()
+        if (snap.exists()) snap.toObject(Video::class.java) else null
+    }
+
+    suspend fun createOrUpdateVideo(video: Video): Result<String> = runCatching {
+        val trimmedTitle = video.title.trim()
+        if (trimmedTitle.isBlank()) {
+            throw IllegalArgumentException("Video title cannot be blank.")
+        }
+        val trimmedUrl = video.videoUrl.trim()
+        if (trimmedUrl.isBlank()) {
+            throw IllegalArgumentException("Video URL cannot be blank.")
+        }
+        val id = if (video.id.isNotBlank()) video.id else if (video.videoId.isNotBlank()) video.videoId else "vid_${UUID.randomUUID().toString().take(8)}"
+        val adminUid = auth.currentUser?.uid ?: ""
+        val adminName = video.createdByName.ifBlank { auth.currentUser?.displayName ?: "Master Coach" }
+
+        val data = mapOf(
+            "videoId" to id,
+            "title" to trimmedTitle,
+            "description" to video.description.trim(),
+            "programId" to video.programId,
+            "programName" to video.programName,
+            "category" to video.category.ifBlank { "Techniques" },
+            "videoUrl" to trimmedUrl,
+            "thumbnailUrl" to video.thumbnailUrl.trim(),
+            "durationText" to video.durationText.ifBlank { "10 mins" },
+            "durationSeconds" to video.durationSeconds,
+            "minRankOrder" to video.minRankOrder,
+            "targetBelt" to video.targetBelt.ifBlank { "All" },
+            "branchIds" to video.branchIds,
+            "accessLevel" to video.accessLevel.ifBlank { "All" },
+            "published" to video.published,
+            "createdBy" to adminUid,
+            "createdByName" to adminName,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        val docRef = db.collection("videos").document(id)
+        val snap = docRef.get().await()
+        if (!snap.exists()) {
+            val initial = data.toMutableMap()
+            initial["createdAt"] = FieldValue.serverTimestamp()
+            docRef.set(initial).await()
+        } else {
+            docRef.set(data, SetOptions.merge()).await()
+        }
+        recordAuditLog(
+            action = "VIDEO_SAVED",
+            targetType = "video",
+            targetId = id,
+            branchId = "",
+            details = "Added/Updated training video '$trimmedTitle' (Category: ${video.category})"
+        )
+        id
+    }
+
+    suspend fun setVideoPublished(videoId: String, published: Boolean): Result<Unit> = runCatching {
+        if (videoId.isBlank()) throw IllegalArgumentException("Video ID cannot be blank.")
+        db.collection("videos").document(videoId).update(
+            mapOf(
+                "published" to published,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+        recordAuditLog(
+            action = if (published) "VIDEO_PUBLISHED" else "VIDEO_UNPUBLISHED",
+            targetType = "video",
+            targetId = videoId,
+            branchId = "",
+            details = "Set video $videoId published state to $published"
+        )
+    }
+
+    suspend fun deleteVideo(videoId: String): Result<Unit> = runCatching {
+        if (videoId.isBlank()) throw IllegalArgumentException("Video ID cannot be blank.")
+        db.collection("videos").document(videoId).delete().await()
+        recordAuditLog(
+            action = "VIDEO_DELETED",
+            targetType = "video",
+            targetId = videoId,
+            branchId = "",
+            details = "Deleted training video $videoId"
+        )
     }
 
     // Announcements
@@ -2429,12 +3016,48 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
                     ).await()
                 }
 
+                // Belt Ranks (Traditional Karate & Olympic Taekwondo)
+                val beltRanks = listOf(
+                    BeltRank(id = "rank_karate_white", rankId = "rank_karate_white", programId = "prog_karate", programName = "Traditional Karate", beltName = "White Belt", rankOrder = 1, colorHex = "#F5F5F5", minClassesRequired = 0, minMonthsRequired = 0, syllabus = "Basics: Seiken Tsuki, Age Uke, Mae Geri, Zenkutsu Dachi", active = true),
+                    BeltRank(id = "rank_karate_yellow", rankId = "rank_karate_yellow", programId = "prog_karate", programName = "Traditional Karate", beltName = "Yellow Belt", rankOrder = 2, colorHex = "#FDD835", minClassesRequired = 24, minMonthsRequired = 2, syllabus = "Kata: Taikyoku Shodan. Strikes: Mawashi Geri, Gyaku Tsuki", active = true),
+                    BeltRank(id = "rank_karate_orange", rankId = "rank_karate_orange", programId = "prog_karate", programName = "Traditional Karate", beltName = "Orange Belt", rankOrder = 3, colorHex = "#FB8C00", minClassesRequired = 48, minMonthsRequired = 4, syllabus = "Kata: Heian Shodan. Basic Kumite & Stance transitions", active = true),
+                    BeltRank(id = "rank_karate_green", rankId = "rank_karate_green", programId = "prog_karate", programName = "Traditional Karate", beltName = "Green Belt", rankOrder = 4, colorHex = "#43A047", minClassesRequired = 72, minMonthsRequired = 6, syllabus = "Kata: Heian Nidan. Sparring timing, Yoko Geri Kekomi", active = true),
+                    BeltRank(id = "rank_karate_blue", rankId = "rank_karate_blue", programId = "prog_karate", programName = "Traditional Karate", beltName = "Blue Belt", rankOrder = 5, colorHex = "#1E88E5", minClassesRequired = 100, minMonthsRequired = 9, syllabus = "Kata: Heian Sandan / Yondan. Controlled free sparring (Jiyu Kumite)", active = true),
+                    BeltRank(id = "rank_karate_brown", rankId = "rank_karate_brown", programId = "prog_karate", programName = "Traditional Karate", beltName = "Brown Belt", rankOrder = 6, colorHex = "#6D4C41", minClassesRequired = 140, minMonthsRequired = 12, syllabus = "Kata: Heian Godan, Tekki Shodan. Advanced counter-striking", active = true),
+                    BeltRank(id = "rank_karate_black", rankId = "rank_karate_black", programId = "prog_karate", programName = "Traditional Karate", beltName = "Black Belt 1st Dan", rankOrder = 7, colorHex = "#212121", minClassesRequired = 220, minMonthsRequired = 24, syllabus = "Kata: Bassai Dai, Kanku Dai. Mastery in Kumite, Bunkai & Dojo Leadership", active = true),
+
+                    BeltRank(id = "rank_tkd_white", rankId = "rank_tkd_white", programId = "prog_taekwondo", programName = "Olympic Taekwondo", beltName = "White Belt (10th Geup)", rankOrder = 1, colorHex = "#F5F5F5", minClassesRequired = 0, minMonthsRequired = 0, syllabus = "Stances: Moa Seogi, Ap Seogi. Front Kick (Ap Chagi)", active = true),
+                    BeltRank(id = "rank_tkd_yellow", rankId = "rank_tkd_yellow", programId = "prog_taekwondo", programName = "Olympic Taekwondo", beltName = "Yellow Belt (8th Geup)", rankOrder = 2, colorHex = "#FDD835", minClassesRequired = 20, minMonthsRequired = 2, syllabus = "Taegeuk Il Jang. Turning Kick (Dollyo Chagi)", active = true),
+                    BeltRank(id = "rank_tkd_green", rankId = "rank_tkd_green", programId = "prog_taekwondo", programName = "Olympic Taekwondo", beltName = "Green Belt (6th Geup)", rankOrder = 3, colorHex = "#43A047", minClassesRequired = 50, minMonthsRequired = 5, syllabus = "Taegeuk Sam Jang. Side Kick (Yeop Chagi)", active = true),
+                    BeltRank(id = "rank_tkd_black", rankId = "rank_tkd_black", programId = "prog_taekwondo", programName = "Olympic Taekwondo", beltName = "Black Belt 1st Dan/Poom", rankOrder = 4, colorHex = "#212121", minClassesRequired = 200, minMonthsRequired = 24, syllabus = "Koryo Poomsae. Full Olympic Sparring competition rules", active = true)
+                )
+                beltRanks.forEach { r ->
+                    db.collection("beltRanks").document(r.id).set(
+                        mapOf(
+                            "rankId" to r.id,
+                            "programId" to r.programId,
+                            "programName" to r.programName,
+                            "beltName" to r.beltName,
+                            "rankOrder" to r.rankOrder,
+                            "colorHex" to r.colorHex,
+                            "stripeCount" to r.stripeCount,
+                            "minClassesRequired" to r.minClassesRequired,
+                            "minMonthsRequired" to r.minMonthsRequired,
+                            "syllabus" to r.syllabus,
+                            "active" to r.active,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        ),
+                        SetOptions.merge()
+                    ).await()
+                }
+
                 // Videos
                 val videos = listOf(
-                    Video(id = "vid_roundhouse", title = "Perfecting the Mawashi Geri (Roundhouse Kick)", description = "Detailed foot pivot, chambering, hip drive, and recoil drills.", category = "Techniques", videoUrl = "https://www.truefighters.in/training/roundhouse", durationText = "12 mins", accessLevel = "All", published = true),
-                    Video(id = "vid_warmup", title = "Dynamic Fighter Warmup & Hip Mobility Routine", description = "Essential 10-minute flow to prevent hamstring and groin injuries.", category = "Warmups", videoUrl = "https://www.truefighters.in/training/warmup", durationText = "10 mins", accessLevel = "All", published = true),
-                    Video(id = "vid_boxing_combos", title = "Fluid 4-Strike Boxing Combinations & Head Movement", description = "Jab - Cross - Slip - Left Hook - Low Right roundhouse finish.", category = "Techniques", videoUrl = "https://www.truefighters.in/training/boxing-combos", durationText = "15 mins", accessLevel = "Intermediate", published = true),
-                    Video(id = "vid_selfdefense_wrist", title = "Street Wrist-Grab & Collar Choke Escapes", description = "Biomechanical leverage principles for instant escape and counter.", category = "Self Defense", videoUrl = "https://www.truefighters.in/training/self-defense", durationText = "8 mins", accessLevel = "All", published = true)
+                    Video(id = "vid_roundhouse", videoId = "vid_roundhouse", title = "Perfecting the Mawashi Geri (Roundhouse Kick)", description = "Detailed foot pivot, chambering, hip drive, and recoil drills.", programId = "prog_karate", programName = "Traditional Karate", category = "Techniques", videoUrl = "https://www.truefighters.in/training/roundhouse", durationText = "12 mins", minRankOrder = 1, targetBelt = "All", accessLevel = "All", published = true),
+                    Video(id = "vid_warmup", videoId = "vid_warmup", title = "Dynamic Fighter Warmup & Hip Mobility Routine", description = "Essential 10-minute flow to prevent hamstring and groin injuries.", programId = "", programName = "All Programs", category = "Warmups", videoUrl = "https://www.truefighters.in/training/warmup", durationText = "10 mins", minRankOrder = 1, targetBelt = "All", accessLevel = "All", published = true),
+                    Video(id = "vid_boxing_combos", videoId = "vid_boxing_combos", title = "Fluid 4-Strike Boxing Combinations & Head Movement", description = "Jab - Cross - Slip - Left Hook - Low Right roundhouse finish.", programId = "prog_mma", programName = "Mixed Martial Arts (MMA)", category = "Techniques", videoUrl = "https://www.truefighters.in/training/boxing-combos", durationText = "15 mins", minRankOrder = 2, targetBelt = "Yellow Belt+", accessLevel = "Intermediate", published = true),
+                    Video(id = "vid_selfdefense_wrist", videoId = "vid_selfdefense_wrist", title = "Street Wrist-Grab & Collar Choke Escapes", description = "Biomechanical leverage principles for instant escape and counter.", programId = "prog_karate", programName = "Traditional Karate", category = "Self Defense", videoUrl = "https://www.truefighters.in/training/self-defense", durationText = "8 mins", minRankOrder = 1, targetBelt = "All", accessLevel = "All", published = true)
                 )
                 videos.forEach { v ->
                     db.collection("videos").document(v.id).set(

@@ -289,17 +289,61 @@ service cloud.firestore {
       allow delete: if isBranchAdminFor(existing().get('branchId', ''));
     }
 
-    // Certificates
-    match /certificates/{certificateId} {
+    // Belt Ranks
+    match /beltRanks/{rankId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Grading Assessments
+    match /gradingAssessments/{assessmentId} {
       allow get: if isSignedIn() && (
-        resource.data.get('studentUserId', '') == request.auth.uid ||
-        isBranchAdminFor(resource.data.get('branchId', ''))
+        (resource == null && (isCoach() || isAdmin())) ||
+        (resource != null && (
+          resource.data.get('studentUserId', '') == request.auth.uid ||
+          isCoachForBranch(resource.data.get('branchId', '')) ||
+          isBranchAdminFor(resource.data.get('branchId', ''))
+        ))
       );
       allow list: if isSignedIn() && (
         resource.data.get('studentUserId', '') == request.auth.uid ||
+        isCoach() ||
         isAdmin()
       );
-      allow write: if isAdmin();
+      allow create: if isSignedIn() && (
+        isBranchAdminFor(incoming().get('branchId', '')) ||
+        (isCoachForBranch(incoming().get('branchId', '')) && incoming().get('status', '') == 'pending_approval')
+      ) &&
+      incoming().get('branchId', '') is string && incoming().get('branchId', '').size() > 0 &&
+      incoming().get('studentId', '') is string && incoming().get('studentId', '').size() > 0;
+      allow update: if (
+        isBranchAdminFor(incoming().get('branchId', '')) ||
+        (isCoachForBranch(incoming().get('branchId', '')) &&
+         existing().get('status', '') == 'pending_approval' &&
+         incoming().get('status', '') == 'pending_approval')
+      );
+      allow delete: if isBranchAdminFor(existing().get('branchId', ''));
+    }
+
+    // Certificates
+    match /certificates/{certificateId} {
+      allow get: if isSignedIn() && (
+        (resource == null && (isAdmin() || isCoach())) ||
+        (resource != null && (
+          resource.data.get('studentUserId', '') == request.auth.uid ||
+          isCoachForBranch(resource.data.get('branchId', '')) ||
+          isBranchAdminFor(resource.data.get('branchId', ''))
+        ))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('studentUserId', '') == request.auth.uid ||
+        isCoach() ||
+        isAdmin()
+      );
+      allow create, update: if isBranchAdminFor(incoming().get('branchId', '')) &&
+        incoming().get('branchId', '') is string && incoming().get('branchId', '').size() > 0 &&
+        incoming().get('studentId', '') is string && incoming().get('studentId', '').size() > 0;
+      allow delete: if isBranchAdminFor(existing().get('branchId', ''));
     }
 
     // Videos

@@ -25,6 +25,7 @@ import com.example.ui.components.StatusBadge
 import com.example.ui.theme.GoldBelt
 import com.example.ui.theme.RedPrimary
 import com.example.ui.theme.SuccessGreen
+import com.example.ui.theme.TextMuted
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,9 +34,13 @@ fun CoachDashboardScreen(
     students: List<Student>,
     branches: List<Branch>,
     classSessions: List<ClassSession> = emptyList(),
+    programs: List<Program> = emptyList(),
+    beltRanks: List<BeltRank> = emptyList(),
+    gradingAssessments: List<GradingAssessment> = emptyList(),
     coachProfile: UserProfile? = null,
     onMarkAttendance: (Attendance) -> Unit,
     onSaveAssessment: (ProgressRecord) -> Unit,
+    onSubmitGradingAssessment: (GradingAssessment) -> Unit = {},
     onPublishAnnouncement: (Announcement) -> Unit,
     onSignOut: () -> Unit
 ) {
@@ -88,7 +93,11 @@ fun CoachDashboardScreen(
     // Assessment dialog state
     var assessingStudent by remember { mutableStateOf<Student?>(null) }
     var newRank by remember { mutableStateOf("Yellow Belt") }
+    var newRankOrder by remember { mutableStateOf(2) }
+    var scoreText by remember { mutableStateOf("85") }
+    var techniqueGrade by remember { mutableStateOf("A") }
     var skillNotes by remember { mutableStateOf("") }
+    var assessmentNotice by remember { mutableStateOf<String?>(null) }
 
     // Announcement state
     var announcementTitle by remember { mutableStateOf("") }
@@ -277,6 +286,13 @@ fun CoachDashboardScreen(
                 }
                 1 -> {
                     // Belt Assessment Tab
+                    val myAssessments = remember(gradingAssessments, coachProfile, assignedBranchIds) {
+                        gradingAssessments.filter { a ->
+                            (coachProfile != null && (a.coachId == coachProfile.id || a.coachName == coachProfile.displayName)) ||
+                            (assignedBranchIds.isNotEmpty() && assignedBranchIds.contains(a.branchId))
+                        }
+                    }
+
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
@@ -290,16 +306,33 @@ fun CoachDashboardScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Evaluate form, kata, striking power, and recommend belt upgrades",
+                                text = "Evaluate student technique, kata & sparring, and submit promotion recommendations for Admin approval",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            if (assessmentNotice != null) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = SuccessGreen.copy(alpha = 0.15f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(imageVector = Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(text = assessmentNotice ?: "", fontSize = 12.sp, color = SuccessGreen, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         }
 
                         items(batchStudents) { student ->
                             Card(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth().testTag("assess_card_${student.id}"),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Row(
@@ -312,17 +345,66 @@ fun CoachDashboardScreen(
                                     Column {
                                         Text(text = student.fullName, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                         Spacer(modifier = Modifier.height(4.dp))
-                                        Text(text = "Current: ${student.currentBelt}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(text = "Current: ", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            BeltBadge(rank = student.currentBelt)
+                                        }
                                     }
                                     Button(
                                         onClick = {
                                             assessingStudent = student
-                                            newRank = "Green Belt"
-                                            skillNotes = "Demonstrated excellent chambering in roundhouse kicks and crisp kata execution."
+                                            newRank = "Yellow Belt"
+                                            newRankOrder = 2
+                                            scoreText = "85"
+                                            techniqueGrade = "Distinction"
+                                            skillNotes = "Crisp chambering in kicks, strong stance transitions and good kata timing."
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = RedPrimary)
+                                        colors = ButtonDefaults.buttonColors(containerColor = RedPrimary),
+                                        modifier = Modifier.testTag("grade_student_${student.id}")
                                     ) {
                                         Text("Assess / Grade")
+                                    }
+                                }
+                            }
+                        }
+
+                        if (myAssessments.isNotEmpty()) {
+                            item {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "Submitted Grading Assessments",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            items(myAssessments) { assess ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column {
+                                                Text(text = assess.studentName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                Text(text = "Date: ${assess.assessmentDate} • Score: ${assess.score}/100", fontSize = 11.sp, color = TextMuted)
+                                            }
+                                            StatusBadge(status = assess.status)
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            BeltBadge(rank = assess.currentBeltName)
+                                            Icon(imageVector = Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp).padding(horizontal = 4.dp))
+                                            BeltBadge(rank = assess.proposedBeltName)
+                                        }
+                                        if (assess.isApproved && assess.certificateId.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(text = "Official Certificate Issued", fontSize = 11.sp, color = GoldBelt, fontWeight = FontWeight.SemiBold)
+                                        }
                                     }
                                 }
                             }
@@ -413,31 +495,94 @@ fun CoachDashboardScreen(
 
     // Assessment Grading Modal
     assessingStudent?.let { student ->
+        val studentProgramId = student.programId.ifBlank { "prog_karate" }
+        val availableRanks = remember(beltRanks, studentProgramId) {
+            val ranks = beltRanks.filter { it.programId == studentProgramId }
+            if (ranks.isNotEmpty()) ranks else listOf(
+                BeltRank(beltName = "Yellow Belt", rankOrder = 2),
+                BeltRank(beltName = "Orange Belt", rankOrder = 3),
+                BeltRank(beltName = "Green Belt", rankOrder = 4),
+                BeltRank(beltName = "Blue Belt", rankOrder = 5),
+                BeltRank(beltName = "Brown Belt", rankOrder = 6),
+                BeltRank(beltName = "Black Belt 1st Dan", rankOrder = 7)
+            )
+        }
+
         AlertDialog(
             onDismissRequest = { assessingStudent = null },
-            title = { Text("Grade & Belt Upgrade: ${student.fullName}") },
+            title = { Text("Belt Assessment: ${student.fullName}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(text = "Current: ${student.currentBelt}", style = MaterialTheme.typography.bodySmall)
+                    Text(text = "Current Rank: ${student.currentBelt}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                    OutlinedTextField(
-                        value = newRank,
-                        onValueChange = { newRank = it },
-                        label = { Text("Target Belt Rank") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Text(text = "Select Target Rank *", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        availableRanks.take(4).forEach { r ->
+                            FilterChip(
+                                selected = newRank == r.beltName,
+                                onClick = {
+                                    newRank = r.beltName
+                                    newRankOrder = r.rankOrder
+                                },
+                                label = { Text(r.beltName.replace(" Belt", ""), fontSize = 11.sp) }
+                            )
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = scoreText,
+                            onValueChange = { scoreText = it },
+                            label = { Text("Score (0-100) *") },
+                            modifier = Modifier.weight(1f).testTag("assessment_score_input"),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = techniqueGrade,
+                            onValueChange = { techniqueGrade = it },
+                            label = { Text("Grade") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
 
                     OutlinedTextField(
                         value = skillNotes,
                         onValueChange = { skillNotes = it },
-                        label = { Text("Coach Assessment Notes") },
-                        modifier = Modifier.fillMaxWidth()
+                        label = { Text("Coach Notes & Technical Feedback *") },
+                        modifier = Modifier.fillMaxWidth().testTag("assessment_notes_input")
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
+                        val coachName = coachProfile?.displayName?.ifBlank { "Master Coach" } ?: "Master Coach"
+                        val assessment = GradingAssessment(
+                            studentId = student.id,
+                            studentUserId = student.userId.ifBlank { student.id },
+                            studentName = student.fullName,
+                            programId = student.programId.ifBlank { "prog_karate" },
+                            programName = student.programName.ifBlank { "Martial Arts" },
+                            branchId = currentBatch?.branchId ?: student.branchId.ifBlank { "branch_main" },
+                            branchName = currentBatch?.branchName ?: student.branchName.ifBlank { coachBranchName },
+                            batchId = currentBatch?.id ?: student.batchId,
+                            currentBeltName = student.currentBelt,
+                            proposedBeltName = newRank,
+                            proposedRankOrder = newRankOrder,
+                            coachId = coachProfile?.id ?: "",
+                            coachName = coachName,
+                            assessmentDate = "2026-10-23",
+                            score = scoreText.toIntOrNull() ?: 80,
+                            techniqueGrade = techniqueGrade,
+                            status = "pending_approval",
+                            coachComments = skillNotes
+                        )
+                        onSubmitGradingAssessment(assessment)
+
                         val record = ProgressRecord(
                             branchId = student.branchId.ifBlank { "branch_main" },
                             studentId = student.id,
@@ -445,15 +590,19 @@ fun CoachDashboardScreen(
                             studentName = student.fullName,
                             discipline = "Martial Arts",
                             rank = newRank,
-                            assessmentDate = "22 Oct 2026",
+                            assessmentDate = "23 Oct 2026",
                             skillNotes = skillNotes,
-                            coachName = "Master Coach"
+                            coachName = coachName
                         )
                         onSaveAssessment(record)
+
+                        assessmentNotice = "Submitted grading assessment for ${student.fullName} -> $newRank. Pending admin approval."
                         assessingStudent = null
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RedPrimary),
+                    modifier = Modifier.testTag("submit_grading_assessment_btn")
                 ) {
-                    Text("Save & Promote")
+                    Text("Submit for Admin Review")
                 }
             },
             dismissButton = {

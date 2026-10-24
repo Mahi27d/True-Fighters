@@ -79,6 +79,8 @@ fun AppContent(viewModel: MainViewModel) {
     val admissionRequests by viewModel.admissionRequests.collectAsStateWithLifecycle()
     val coaches by viewModel.coaches.collectAsStateWithLifecycle()
     val feePlans by viewModel.feePlans.collectAsStateWithLifecycle()
+    val beltRanks by viewModel.beltRanks.collectAsStateWithLifecycle()
+    val gradingAssessments by viewModel.gradingAssessments.collectAsStateWithLifecycle()
 
     val currentUserProfile by viewModel.currentUserProfile.collectAsStateWithLifecycle()
 
@@ -136,6 +138,10 @@ fun AppContent(viewModel: MainViewModel) {
                         coaches = coaches,
                         attendanceList = attendanceList,
                         feePlans = feePlans,
+                        beltRanks = beltRanks,
+                        gradingAssessments = gradingAssessments,
+                        certificates = certificates,
+                        videos = videos,
                         adminProfile = currentUserProfile,
                         onAddBranch = { viewModel.addBranch(it) },
                         onUpdateBranch = { viewModel.updateBranch(it) },
@@ -162,6 +168,13 @@ fun AppContent(viewModel: MainViewModel) {
                         onManageBatchStudent = { bId, sId, act, targetBId -> viewModel.manageBatchStudent(bId, sId, act, targetBId) },
                         onCreateSession = { viewModel.createClassSession(it) },
                         onRescheduleOrCancelSession = { sId, date, start, end, status, reason -> viewModel.rescheduleOrCancelSession(sId, date, start, end, status, reason) },
+                        onApproveGrading = { aId, notes -> viewModel.approveGradingAssessment(aId, notes) },
+                        onRejectGrading = { aId, reason -> viewModel.rejectGradingAssessment(aId, reason) },
+                        onCreateBeltRank = { viewModel.createOrUpdateBeltRank(it) },
+                        onToggleBeltRankStatus = { rId, active -> viewModel.toggleBeltRankStatus(rId, active) },
+                        onCreateVideo = { viewModel.createOrUpdateVideo(it) },
+                        onToggleVideoPublished = { vId, pub -> viewModel.toggleVideoPublished(vId, pub) },
+                        onDeleteVideo = { viewModel.deleteVideo(it) },
                         onSignOut = {
                             Firebase.auth.signOut()
                             viewModel.setRoleOverride(null)
@@ -174,9 +187,13 @@ fun AppContent(viewModel: MainViewModel) {
                         students = students,
                         branches = branches,
                         classSessions = classSessions,
+                        programs = programs,
+                        beltRanks = beltRanks,
+                        gradingAssessments = gradingAssessments,
                         coachProfile = currentUserProfile,
                         onMarkAttendance = { viewModel.markAttendance(it) },
                         onSaveAssessment = { viewModel.addProgressRecord(it) },
+                        onSubmitGradingAssessment = { viewModel.submitGradingAssessment(it) },
                         onPublishAnnouncement = { viewModel.publishAnnouncement(it) },
                         onSignOut = {
                             Firebase.auth.signOut()
@@ -208,6 +225,8 @@ fun AppContent(viewModel: MainViewModel) {
                         progressRecords = progressRecords,
                         certificates = certificates,
                         videos = videos,
+                        beltRanks = beltRanks,
+                        gradingAssessments = gradingAssessments,
                         announcements = announcements,
                         onPayInvoice = { pay -> viewModel.recordPayment(pay) },
                         onSignOut = {

@@ -339,35 +339,123 @@ data class ProgressRecord(
 )
 
 @IgnoreExtraProperties
-data class Certificate(
+data class BeltRank(
     @DocumentId val id: String = "",
-    val branchId: String = "",
+    val rankId: String = "",
+    val programId: String = "",
+    val programName: String = "",
+    val beltName: String = "",
+    val rankOrder: Int = 1, // 1 = White, 2 = Yellow, etc. Higher number = higher rank
+    val colorHex: String = "#FFFFFF",
+    val stripeCount: Int = 0,
+    val minClassesRequired: Int = 0,
+    val minMonthsRequired: Int = 0,
+    val syllabus: String = "",
+    val active: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { rankId }
+}
+
+@IgnoreExtraProperties
+data class GradingAssessment(
+    @DocumentId val id: String = "",
+    val assessmentId: String = "",
     val studentId: String = "",
     val studentUserId: String = "",
     val studentName: String = "",
-    val title: String = "",
+    val programId: String = "",
+    val programName: String = "",
+    val branchId: String = "",
+    val branchName: String = "",
+    val batchId: String = "",
+    val currentBeltRankId: String = "",
+    val currentBeltName: String = "White Belt",
+    val currentRankOrder: Int = 1,
+    val proposedBeltRankId: String = "",
+    val proposedBeltName: String = "Yellow Belt",
+    val proposedRankOrder: Int = 2,
+    val coachId: String = "",
+    val coachName: String = "",
+    val assessmentDate: String = "", // YYYY-MM-DD
+    val score: Int = 0, // 0-100
+    val techniqueGrade: String = "Pass", // "Pass", "A", "B", "Distinction"
+    val kataOrFormsScore: Int = 0,
+    val sparringScore: Int = 0,
+    val status: String = "pending_approval", // "pending_approval", "approved", "rejected"
+    val coachComments: String = "",
+    val adminNotes: String = "",
+    val approvedByAdminId: String = "",
+    val approvedByAdminName: String = "",
+    val approvedAt: String = "",
+    val certificateId: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { assessmentId }
+    val isPending: Boolean get() = status.lowercase() == "pending_approval"
+    val isApproved: Boolean get() = status.lowercase() == "approved"
+    val isRejected: Boolean get() = status.lowercase() == "rejected"
+}
+
+@IgnoreExtraProperties
+data class Certificate(
+    @DocumentId val id: String = "",
+    val certificateId: String = "",
+    val certificateNumber: String = "", // e.g. "TF-CERT-KARATE-2026-00123"
+    val branchId: String = "",
+    val branchName: String = "",
+    val studentId: String = "",
+    val studentUserId: String = "",
+    val studentName: String = "",
+    val programId: String = "",
+    val programName: String = "",
+    val title: String = "Certificate of Belt Advancement",
     val discipline: String = "",
     val grade: String = "",
+    val awardedBelt: String = "",
+    val rankOrder: Int = 1,
+    val assessmentId: String = "",
     val storagePath: String = "",
+    val verificationCode: String = "",
     val issuedAt: String = "",
     val issuedBy: String = "",
+    val issuedByAdminId: String = "",
+    val status: String = "issued", // "issued", "revoked"
     @ServerTimestamp val createdAt: Timestamp? = null
-)
+) {
+    val effectiveId: String get() = id.ifBlank { certificateId }
+    val effectiveNumber: String get() = certificateNumber.ifBlank { "TF-CERT-${effectiveId.takeLast(6).uppercase()}" }
+    val effectiveBelt: String get() = awardedBelt.ifBlank { grade }
+    val effectiveProgram: String get() = programName.ifBlank { discipline }
+}
 
 @IgnoreExtraProperties
 data class Video(
     @DocumentId val id: String = "",
+    val videoId: String = "",
     val title: String = "",
     val description: String = "",
-    val category: String = "Techniques", // "Techniques", "Warmups", "Fitness", "Self Defense", "Forms"
+    val programId: String = "",
+    val programName: String = "",
+    val category: String = "Techniques", // "Techniques", "Warmups", "Forms/Kata", "Sparring", "Self Defense", "Fitness"
     val videoUrl: String = "",
+    val thumbnailUrl: String = "",
     val durationText: String = "10 mins",
-    val branchIds: List<String> = emptyList(),
+    val durationSeconds: Int = 600,
+    val minRankOrder: Int = 1, // Minimum belt rank order required to view
+    val targetBelt: String = "All", // e.g. "White Belt", "Yellow Belt", "All"
+    val branchIds: List<String> = emptyList(), // empty = All branches
     val accessLevel: String = "All", // "All", "Beginner", "Advanced"
     val published: Boolean = true,
     @ServerTimestamp val createdAt: Timestamp? = null,
-    val createdBy: String = ""
-)
+    @ServerTimestamp val updatedAt: Timestamp? = null,
+    val createdBy: String = "",
+    val createdByName: String = ""
+) {
+    val effectiveId: String get() = id.ifBlank { videoId }
+}
 
 @IgnoreExtraProperties
 data class Announcement(

@@ -9,10 +9,14 @@ import com.example.data.model.ClassSession
 import com.example.data.model.FeeInvoice
 import com.example.data.model.FeePlan
 import com.example.data.model.InvoiceItem
+import com.example.data.model.BeltRank
+import com.example.data.model.Certificate
+import com.example.data.model.GradingAssessment
 import com.example.data.model.Payment
 import com.example.data.model.Program
 import com.example.data.model.Student
 import com.example.data.model.UserProfile
+import com.example.data.model.Video
 import com.example.data.repository.TrueFightersRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -1566,6 +1570,369 @@ class TrueFightersRepositoryRuleTest : FirestoreEmulatorTestBase() {
       firestore.collection("feeInvoices").document(invId).get().await()
     }
     assertTrue("Branch admin for branch_west must NOT read branch_main invoice", westAdminRead.isFailure)
+  }
+
+  @Test
+  fun phase7_beltRank_configuration_and_program_ladder() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+
+    // Admin creates belt rank
+    val purpleRank = BeltRank(
+      rankId = "rank_karate_purple_test",
+      programId = "prog_karate",
+      programName = "Karate-Do",
+      beltName = "Purple Belt",
+      rankOrder = 4,
+      colorHex = "#800080",
+      syllabus = "Heian Yondan Kata and Advanced Sparring",
+      active = true
+    )
+    val createResult = repo.createOrUpdateBeltRank(purpleRank)
+    assertTrue("Admin should be able to create belt rank: ${createResult.exceptionOrNull()}", createResult.isSuccess)
+
+    // Admin toggles active status
+    val toggleResult = repo.setBeltRankStatus("rank_karate_purple_test", false)
+    assertTrue("Admin should be able to toggle belt rank status", toggleResult.isSuccess)
+
+    // Student can read belt rank
+    signInTestUser("student_belt_reader@truefighters.in")
+    val readResult = repo.getBeltRank("rank_karate_purple_test")
+    assertTrue("Student should be able to read belt rank", readResult.isSuccess)
+    assertEquals("Purple Belt", readResult.getOrNull()?.beltName)
+
+    // Student cannot write or alter belt ranks directly (blocked by Firestore Rules)
+    val unauthWrite = runCatching {
+      firestore.collection("beltRanks").document("rank_karate_purple_test")
+        .update("beltName", "Tampered Belt").await()
+    }
+    assertTrue("Student direct write on belt rank must be rejected by rules", unauthWrite.isFailure)
+  }
+
+  @Test
+  fun phase7_coach_grading_submission_and_branch_authorization() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+
+    // Ensure branch_main and branch_west exist
+    repo.seedAcademyDefaultsIfNeeded()
+
+    // Provision Student in branch_main
+    val studentUid = signInTestUser("std_grading_target@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    repo.createOrUpdateStudent(
+      Student(
+        id = "std_grading_target",
+        userId = studentUid,
+        fullName = "Devansh Verma",
+        branchId = "branch_main",
+        programId = "prog_karate",
+        currentBelt = "White Belt",
+        status = "active"
+      )
+    ).getOrThrow()
+
+    // Provision Coach A for branch_main
+    val coachAUid = signInTestUser("coach_main_auth@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    firestore.collection("users").document(coachAUid).set(
+      mapOf(
+        "userId" to coachAUid,
+        "email" to "coach_main_auth@truefighters.in",
+        "displayName" to "Sensei Vikram",
+        "role" to "coach",
+        "branchIds" to listOf("branch_main"),
+        "status" to "active"
+      )
+    ).await()
+
+    // Provision Coach B for branch_west ONLY
+    val coachBUid = signInTestUser("coach_west_unauth@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    firestore.collection("users").document(coachBUid).set(
+      mapOf(
+        "userId" to coachBUid,
+        "email" to "coach_west_unauth@truefighters.in",
+        "displayName" to "Sensei Kabir",
+        "role" to "coach",
+        "branchIds" to listOf("branch_west"),
+        "status" to "active"
+      )
+    ).await()
+
+    // 1. Authorized Coach A submits assessment for branch_main student -> SUCCESS
+    signInTestUser("coach_main_auth@truefighters.in")
+    val assessment = GradingAssessment(
+      assessmentId = "assess_devansh_yellow",
+      studentId = "std_grading_target",
+      studentUserId = studentUid,
+      studentName = "Devansh Verma",
+      branchId = "branch_main",
+      programId = "prog_karate",
+      currentBeltName = "White Belt",
+      currentRankOrder = 1,
+      proposedBeltName = "Yellow Belt",
+      proposedRankOrder = 2,
+      score = 88,
+      techniqueGrade = "A",
+      coachComments = "Demonstrated great stances and focus in Heian Shodan."
+    )
+    val submitResult = repo.submitGradingAssessment(assessment)
+    assertTrue("Authorized coach should be able to submit assessment: ${submitResult.exceptionOrNull()}", submitResult.isSuccess)
+
+    // 2. Unauthorized Coach B attempts to submit assessment for branch_main student -> FAILS
+    signInTestUser("coach_west_unauth@truefighters.in")
+    val crossBranchAssessment = GradingAssessment(
+      assessmentId = "assess_devansh_orange_illegal",
+      studentId = "std_grading_target",
+      studentUserId = studentUid,
+      studentName = "Devansh Verma",
+      branchId = "branch_main",
+      programId = "prog_karate",
+      currentBeltName = "White Belt",
+      currentRankOrder = 1,
+      proposedBeltName = "Orange Belt",
+      proposedRankOrder = 3,
+      score = 90
+    )
+    val unauthorizedSubmit = repo.submitGradingAssessment(crossBranchAssessment)
+    assertTrue("Cross-branch coach submission must be rejected", unauthorizedSubmit.isFailure)
+  }
+
+  @Test
+  fun phase7_admin_approval_promotes_student_and_generates_certificate() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+    repo.seedAcademyDefaultsIfNeeded()
+
+    // Provision student
+    val studentUid = signInTestUser("std_promo_test@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    repo.createOrUpdateStudent(
+      Student(
+        id = "std_promo_test",
+        userId = studentUid,
+        fullName = "Ishaan Gupta",
+        branchId = "branch_main",
+        programId = "prog_karate",
+        currentBelt = "White Belt",
+        status = "active"
+      )
+    ).getOrThrow()
+
+    // Submit pending assessment
+    val assessId = "assess_ishaan_yellow_promo"
+    repo.submitGradingAssessment(
+      GradingAssessment(
+        assessmentId = assessId,
+        studentId = "std_promo_test",
+        studentUserId = studentUid,
+        studentName = "Ishaan Gupta",
+        branchId = "branch_main",
+        programId = "prog_karate",
+        currentBeltName = "White Belt",
+        currentRankOrder = 1,
+        proposedBeltName = "Yellow Belt",
+        proposedRankOrder = 2,
+        score = 92,
+        techniqueGrade = "Distinction",
+        coachComments = "Exceptional technique and speed."
+      )
+    ).getOrThrow()
+
+    // Admin approves the promotion
+    val approveResult = repo.approveGradingAssessment(assessId, adminNotes = "Approved with highest honors.")
+    assertTrue("Admin approval must succeed: ${approveResult.exceptionOrNull()}", approveResult.isSuccess)
+
+    val certificate = approveResult.getOrThrow()
+    assertNotNull("Certificate must be returned", certificate)
+    assertTrue("Certificate number must start with TF-CERT: ${certificate.certificateNumber}", certificate.certificateNumber.startsWith("TF-CERT-"))
+    assertTrue("Verification code must be generated", certificate.verificationCode.isNotBlank())
+    assertEquals("Yellow Belt", certificate.awardedBelt)
+
+    // Verify student record's currentBelt is updated
+    val updatedStudentSnap = firestore.collection("students").document("std_promo_test").get().await()
+    assertEquals("Yellow Belt", updatedStudentSnap.getString("currentBelt"))
+
+    // Verify assessment status is "approved" and certificateId is linked
+    val updatedAssessSnap = firestore.collection("gradingAssessments").document(assessId).get().await()
+    assertEquals("approved", updatedAssessSnap.getString("status"))
+    assertEquals(certificate.certificateId, updatedAssessSnap.getString("certificateId"))
+  }
+
+  @Test
+  fun phase7_invalid_progression_and_duplicate_promotion_denied() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+    repo.seedAcademyDefaultsIfNeeded()
+
+    // Provision student
+    val studentUid = signInTestUser("std_invalid_prog@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    repo.createOrUpdateStudent(
+      Student(
+        id = "std_invalid_prog",
+        userId = studentUid,
+        fullName = "Meera Nair",
+        branchId = "branch_main",
+        programId = "prog_karate",
+        currentBelt = "Green Belt",
+        status = "active"
+      )
+    ).getOrThrow()
+
+    // 1. Invalid progression: same belt rank (proposedOrder <= currentOrder)
+    val invalidRankSubmit = repo.submitGradingAssessment(
+      GradingAssessment(
+        assessmentId = "assess_meera_invalid_prog",
+        studentId = "std_invalid_prog",
+        studentUserId = studentUid,
+        studentName = "Meera Nair",
+        branchId = "branch_main",
+        programId = "prog_karate",
+        currentBeltName = "Green Belt",
+        currentRankOrder = 4,
+        proposedBeltName = "Green Belt",
+        proposedRankOrder = 4,
+        score = 75
+      )
+    )
+    assertTrue("Submitting equal/lower rank without progression must fail", invalidRankSubmit.isFailure)
+
+    // 2. Submit valid pending assessment
+    val validSubmit = repo.submitGradingAssessment(
+      GradingAssessment(
+        assessmentId = "assess_meera_blue_valid",
+        studentId = "std_invalid_prog",
+        studentUserId = studentUid,
+        studentName = "Meera Nair",
+        branchId = "branch_main",
+        programId = "prog_karate",
+        currentBeltName = "Green Belt",
+        currentRankOrder = 4,
+        proposedBeltName = "Blue Belt",
+        proposedRankOrder = 5,
+        score = 85
+      )
+    )
+    assertTrue("Valid assessment submission must succeed", validSubmit.isSuccess)
+
+    // 3. Duplicate pending assessment for same target belt must be rejected
+    val duplicateSubmit = repo.submitGradingAssessment(
+      GradingAssessment(
+        assessmentId = "assess_meera_blue_dup",
+        studentId = "std_invalid_prog",
+        studentUserId = studentUid,
+        studentName = "Meera Nair",
+        branchId = "branch_main",
+        programId = "prog_karate",
+        currentBeltName = "Green Belt",
+        currentRankOrder = 4,
+        proposedBeltName = "Blue Belt",
+        proposedRankOrder = 5,
+        score = 88
+      )
+    )
+    assertTrue("Duplicate pending assessment for same student and rank must be rejected", duplicateSubmit.isFailure)
+  }
+
+  @Test
+  fun phase7_certificate_student_privacy_and_unauthorized_modification() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+    repo.seedAcademyDefaultsIfNeeded()
+
+    val studentAUid = signInTestUser("std_cert_a@truefighters.in")
+    val studentBUid = signInTestUser("std_cert_b@truefighters.in")
+
+    signInTestUser("Mahi27d@gmail.com")
+    val certId = "cert_priv_a_123"
+    firestore.collection("certificates").document(certId).set(
+      mapOf(
+        "certificateId" to certId,
+        "certificateNumber" to "TF-CERT-KARATE-777",
+        "branchId" to "branch_main",
+        "studentId" to "std_cert_a",
+        "studentUserId" to studentAUid,
+        "studentName" to "Student Alpha",
+        "programId" to "prog_karate",
+        "programName" to "Karate-Do",
+        "awardedBelt" to "Black Belt 1st Dan",
+        "rankOrder" to 8,
+        "status" to "issued"
+      )
+    ).await()
+
+    // 1. Student A can read their own certificate
+    signInTestUser("std_cert_a@truefighters.in")
+    val studentARead = runCatching {
+      firestore.collection("certificates").document(certId).get().await()
+    }
+    assertTrue("Student A reading own certificate must succeed: ${studentARead.exceptionOrNull()}", studentARead.isSuccess)
+    assertEquals("TF-CERT-KARATE-777", studentARead.getOrThrow().getString("certificateNumber"))
+
+    // 2. Student B CANNOT read Student A's certificate (Security Rules deny)
+    signInTestUser("std_cert_b@truefighters.in")
+    val studentBRead = runCatching {
+      firestore.collection("certificates").document(certId).get().await()
+    }
+    assertTrue("Student B reading Student A's certificate must be rejected by rules", studentBRead.isFailure)
+
+    // 3. Student A CANNOT modify certificates directly (Security Rules deny)
+    signInTestUser("std_cert_a@truefighters.in")
+    val tamperAttempt = runCatching {
+      firestore.collection("certificates").document(certId).update("awardedBelt", "Grandmaster 10th Dan").await()
+    }
+    assertTrue("Student direct write on certificate must be rejected by rules", tamperAttempt.isFailure)
+  }
+
+  @Test
+  fun phase7_trainingVideo_catalogue_management_and_filtering() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+
+    // Admin creates training video
+    val testVideo = Video(
+      videoId = "vid_mae_geri_test",
+      title = "Mae Geri Front Snap Kick Mastery",
+      description = "Step by step execution of front snap kick with chamber and recovery.",
+      programId = "prog_karate",
+      programName = "Karate-Do",
+      category = "Techniques",
+      videoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      durationText = "8 mins",
+      minRankOrder = 1,
+      targetBelt = "All",
+      published = true
+    )
+    val createResult = repo.createOrUpdateVideo(testVideo)
+    assertTrue("Admin should be able to create video: ${createResult.exceptionOrNull()}", createResult.isSuccess)
+
+    // Student can read video
+    signInTestUser("student_video_viewer@truefighters.in")
+    val vidSnap = firestore.collection("videos").document("vid_mae_geri_test").get().await()
+    assertTrue("Student should be able to read video", vidSnap.exists())
+    assertEquals("Mae Geri Front Snap Kick Mastery", vidSnap.getString("title"))
+
+    // Student cannot edit video (Firestore Rules deny)
+    val studentEditAttempt = runCatching {
+      firestore.collection("videos").document("vid_mae_geri_test").update("published", false).await()
+    }
+    assertTrue("Student direct update on video must be rejected by rules", studentEditAttempt.isFailure)
+
+    // Admin can toggle publish and delete
+    signInTestUser("Mahi27d@gmail.com")
+    val toggleResult = repo.setVideoPublished("vid_mae_geri_test", false)
+    assertTrue("Admin can toggle publish", toggleResult.isSuccess)
+
+    val deleteResult = repo.deleteVideo("vid_mae_geri_test")
+    assertTrue("Admin can delete video", deleteResult.isSuccess)
   }
 }
 
