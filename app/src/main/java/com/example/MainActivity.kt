@@ -1,9 +1,14 @@
 package com.example
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -15,15 +20,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.Student
 import com.example.data.repository.TrueFightersRepository
 import com.example.features.authentication.AuthScreen
+import com.example.notification.NotificationHelper
 import com.example.ui.admin.AdminDashboardScreen
 import com.example.ui.coach.CoachDashboardScreen
+import com.example.ui.notifications.NotificationBellButton
+import com.example.ui.notifications.NotificationInboxDialog
+import com.example.ui.notifications.NotificationPreferencesDialog
 import com.example.ui.student.StudentDashboardScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.RedDark
@@ -31,6 +42,8 @@ import com.example.viewmodel.MainViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
+import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -39,6 +52,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NotificationHelper.initNotificationChannels(this)
         enableEdgeToEdge()
 
         setContent {
@@ -51,8 +65,14 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AppContent(viewModel: MainViewModel) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
     val roleOverride by viewModel.roleOverride.collectAsStateWithLifecycle()
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
 
     DisposableEffect(Unit) {
         val listener = FirebaseAuth.AuthStateListener { auth ->
@@ -81,13 +101,28 @@ fun AppContent(viewModel: MainViewModel) {
     val feePlans by viewModel.feePlans.collectAsStateWithLifecycle()
     val beltRanks by viewModel.beltRanks.collectAsStateWithLifecycle()
     val gradingAssessments by viewModel.gradingAssessments.collectAsStateWithLifecycle()
+    val userNotifications by viewModel.userNotifications.collectAsStateWithLifecycle()
+    val notificationPreferences by viewModel.notificationPreferences.collectAsStateWithLifecycle()
 
     val currentUserProfile by viewModel.currentUserProfile.collectAsStateWithLifecycle()
+
+    var showNotificationInbox by remember { mutableStateOf(false) }
+    var showNotificationPreferences by remember { mutableStateOf(false) }
 
     LaunchedEffect(currentUser?.uid) {
         val uid = currentUser?.uid
         if (uid != null) {
             viewModel.refreshUserProfile(uid)
+            viewModel.loadUserNotifications(uid)
+            if (!uid.startsWith("demo_")) {
+                FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                    if (!token.isNullOrBlank()) {
+                        coroutineScope.launch {
+                            viewModel.repository.registerFcmToken(uid, token)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -100,6 +135,33 @@ fun AppContent(viewModel: MainViewModel) {
         currentUser != null &&
         (isBootstrapAdmin || (currentUserProfile != null && !isPendingOrSuspendedProfile))
     )
+
+    LaunchedEffect(isAuthenticated) {
+        if (isAuthenticated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    val handleSignOut: () -> Unit = {
+        val uid = currentUser?.uid
+        if (!uid.isNullOrBlank() && !uid.startsWith("demo_")) {
+            FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                if (!token.isNullOrBlank()) {
+                    coroutineScope.launch {
+                        viewModel.repository.unregisterFcmToken(uid, token)
+                    }
+                }
+            }
+        }
+        Firebase.auth.signOut()
+        viewModel.setRoleOverride(null)
+    }
 
     if (!isAuthenticated) {
         AuthScreen(
@@ -175,10 +237,7 @@ fun AppContent(viewModel: MainViewModel) {
                         onCreateVideo = { viewModel.createOrUpdateVideo(it) },
                         onToggleVideoPublished = { vId, pub -> viewModel.toggleVideoPublished(vId, pub) },
                         onDeleteVideo = { viewModel.deleteVideo(it) },
-                        onSignOut = {
-                            Firebase.auth.signOut()
-                            viewModel.setRoleOverride(null)
-                        }
+                        onSignOut = handleSignOut
                     )
                 }
                 "coach" -> {
@@ -195,10 +254,7 @@ fun AppContent(viewModel: MainViewModel) {
                         onSaveAssessment = { viewModel.addProgressRecord(it) },
                         onSubmitGradingAssessment = { viewModel.submitGradingAssessment(it) },
                         onPublishAnnouncement = { viewModel.publishAnnouncement(it) },
-                        onSignOut = {
-                            Firebase.auth.signOut()
-                            viewModel.setRoleOverride(null)
-                        }
+                        onSignOut = handleSignOut
                     )
                 }
                 else -> {
@@ -229,81 +285,128 @@ fun AppContent(viewModel: MainViewModel) {
                         gradingAssessments = gradingAssessments,
                         announcements = announcements,
                         onPayInvoice = { pay -> viewModel.recordPayment(pay) },
-                        onSignOut = {
-                            Firebase.auth.signOut()
-                            viewModel.setRoleOverride(null)
-                        }
+                        onSignOut = handleSignOut
                     )
                 }
             }
 
-            // Floating Role Switcher Pill for quick testing in emulator
-            Surface(
+            // Floating Notification Bell & Role Switcher Pill
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(bottom = 80.dp, end = 16.dp),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                color = RedDark,
-                shadowElevation = 6.dp
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                var menuExpanded by remember { mutableStateOf(false) }
-
-                Row(
-                    modifier = Modifier
-                        .clickable { menuExpanded = true }
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    color = RedDark,
+                    shadowElevation = 6.dp
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.SwapHoriz,
-                        contentDescription = "Switch Role",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
+                    val unreadCount = userNotifications.count { !it.read }
+                    NotificationBellButton(
+                        unreadCount = unreadCount,
+                        onClick = { showNotificationInbox = true }
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Role: ${effectiveRole.replaceFirstChar { it.uppercase() }}",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                    )
+                }
 
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                    color = RedDark,
+                    shadowElevation = 6.dp
+                ) {
+                    var menuExpanded by remember { mutableStateOf(false) }
+
+                    Row(
+                        modifier = Modifier
+                            .clickable { menuExpanded = true }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Switch to Student Portal") },
-                            onClick = {
-                                viewModel.setRoleOverride("student")
-                                menuExpanded = false
-                            }
+                        Icon(
+                            imageVector = Icons.Default.SwapHoriz,
+                            contentDescription = "Switch Role",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
                         )
-                        DropdownMenuItem(
-                            text = { Text("Switch to Coach Portal") },
-                            onClick = {
-                                viewModel.setRoleOverride("coach")
-                                menuExpanded = false
-                            }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Role: ${effectiveRole.replaceFirstChar { it.uppercase() }}",
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
                         )
-                        DropdownMenuItem(
-                            text = { Text("Switch to Admin Portal") },
-                            onClick = {
-                                viewModel.setRoleOverride("admin")
-                                menuExpanded = false
-                            }
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("Sign Out") },
-                            onClick = {
-                                Firebase.auth.signOut()
-                                viewModel.setRoleOverride(null)
-                                menuExpanded = false
-                            }
-                        )
+
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Switch to Student Portal") },
+                                onClick = {
+                                    viewModel.setRoleOverride("student")
+                                    menuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Switch to Coach Portal") },
+                                onClick = {
+                                    viewModel.setRoleOverride("coach")
+                                    menuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Switch to Admin Portal") },
+                                onClick = {
+                                    viewModel.setRoleOverride("admin")
+                                    menuExpanded = false
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Notification Preferences") },
+                                onClick = {
+                                    menuExpanded = false
+                                    showNotificationPreferences = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Sign Out") },
+                                onClick = {
+                                    menuExpanded = false
+                                    handleSignOut()
+                                }
+                            )
+                        }
                     }
                 }
+            }
+
+            if (showNotificationInbox) {
+                NotificationInboxDialog(
+                    notifications = userNotifications,
+                    onMarkRead = { viewModel.markNotificationAsRead(it) },
+                    onOpenSettings = {
+                        showNotificationInbox = false
+                        showNotificationPreferences = true
+                    },
+                    onDismiss = { showNotificationInbox = false }
+                )
+            }
+
+            if (showNotificationPreferences) {
+                val prefWithUser = notificationPreferences.copy(
+                    userId = currentUser?.uid ?: "demo_$effectiveRole"
+                )
+                NotificationPreferencesDialog(
+                    preferences = prefWithUser,
+                    onSave = { updated ->
+                        if (currentUser?.uid != null && !currentUser!!.uid.startsWith("demo_")) {
+                            viewModel.saveNotificationPreferences(updated)
+                        }
+                    },
+                    onDismiss = { showNotificationPreferences = false }
+                )
             }
         }
     }

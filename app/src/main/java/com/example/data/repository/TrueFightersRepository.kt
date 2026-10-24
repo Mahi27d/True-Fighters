@@ -1294,6 +1294,23 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
             branchId = session.branchId,
             details = "Session modified. Status: ${updates["status"] ?: session.status}. Reason: $reason"
         )
+        runCatching {
+            val effStatus = (updates["status"] as? String) ?: session.status
+            val effDate = (updates["sessionDate"] as? String) ?: session.effectiveDate
+            dispatchNotificationWithDeduplication(
+                AppNotification(
+                    recipientRole = "student",
+                    branchId = session.branchId,
+                    batchId = session.batchId,
+                    type = if (effStatus == "cancelled") "class_cancelled" else "class_rescheduled",
+                    title = if (effStatus == "cancelled") "Class Cancelled: ${session.batchName}" else "Schedule Updated: ${session.batchName}",
+                    body = "Session on $effDate is now $effStatus." + if (reason.isNotBlank()) " Note: $reason" else "",
+                    channelId = "classes",
+                    dedupKey = "session_${sessionId}_${effStatus}_$effDate",
+                    data = mapOf("sessionId" to sessionId, "branchId" to session.branchId)
+                )
+            )
+        }
     }
 
     // Attendance
@@ -1655,6 +1672,23 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
             branchId = invoice.branchId,
             details = "Invoice $invNumber for ${invoice.studentName} ($period: ₹${invoice.amountPaise / 100.0}) generated."
         )
+        if (invoice.studentUserId.isNotBlank() && !invoice.studentUserId.startsWith("demo_")) {
+            runCatching {
+                dispatchNotificationWithDeduplication(
+                    AppNotification(
+                        recipientUserId = invoice.studentUserId,
+                        recipientRole = "student",
+                        branchId = invoice.branchId,
+                        type = "fee_reminder",
+                        title = "Fee Invoice Generated ($period)",
+                        body = "Invoice #$invNumber for $period is now available in your portal.",
+                        channelId = "fees",
+                        dedupKey = "invoice_generated_$id",
+                        data = mapOf("invoiceId" to id, "period" to period)
+                    )
+                )
+            }
+        }
         id
     }
 
@@ -1789,6 +1823,23 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
             branchId = invoiceBranchId,
             details = "Recorded ${payment.method} payment of ₹${payment.amountPaise / 100.0} for $invoiceStudentName (Ref: $trimmedRef)."
         )
+        if (payment.studentUserId.isNotBlank() && !payment.studentUserId.startsWith("demo_")) {
+            runCatching {
+                dispatchNotificationWithDeduplication(
+                    AppNotification(
+                        recipientUserId = payment.studentUserId,
+                        recipientRole = "student",
+                        branchId = invoiceBranchId,
+                        type = "payment_receipt",
+                        title = "Payment Receipt Confirmed",
+                        body = "Receipt #$payNumber has been verified and credited to your account.",
+                        channelId = "fees",
+                        dedupKey = "payment_receipt_$id",
+                        data = mapOf("paymentId" to id, "invoiceId" to payment.invoiceId)
+                    )
+                )
+            }
+        }
         id
     }
 
@@ -2275,6 +2326,23 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
             branchId = branchId,
             details = "Admin $adminName approved promotion of $studentName to $proposedBelt. Certificate #$certNumber issued."
         )
+        if (studentUserId.isNotBlank() && !studentUserId.startsWith("demo_")) {
+            runCatching {
+                dispatchNotificationWithDeduplication(
+                    AppNotification(
+                        recipientUserId = studentUserId,
+                        recipientRole = "student",
+                        branchId = branchId,
+                        type = "belt_promotion",
+                        title = "Belt Promotion Approved: $proposedBelt",
+                        body = "Congratulations! Your promotion to $proposedBelt has been approved and Certificate #$certNumber is ready.",
+                        channelId = "gradings",
+                        dedupKey = "promotion_approved_$assessmentId",
+                        data = mapOf("assessmentId" to assessmentId, "certificateId" to certId)
+                    )
+                )
+            }
+        }
 
         Certificate(
             id = certId,
@@ -2640,6 +2708,9 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
 
     suspend fun registerFcmToken(userId: String, token: String): Result<Unit> = runCatching {
         if (userId.isBlank() || token.isBlank()) return@runCatching
+        if (userId.startsWith("demo_")) {
+            throw IllegalArgumentException("Demo mode accounts cannot register production FCM tokens.")
+        }
         val prefRef = db.collection("notificationPreferences").document(userId)
         val snap = prefRef.get().await()
         val currentTokens = (snap.get("fcmTokens") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
@@ -2670,6 +2741,15 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
         if (notification.recipientUserId.isBlank() && notification.recipientRole.isBlank()) {
             throw IllegalArgumentException("Notification must target a user or role.")
         }
+        if (notification.recipientUserId.startsWith("demo_")) {
+            throw IllegalArgumentException("Demo mode accounts cannot receive production notifications.")
+        }
+
+        // Prevent sensitive PII exposure in notification payloads
+        val sensitiveKeys = setOf("phoneNumber", "phone", "guardianPhone", "guardianName", "cardNumber", "cvv", "privateKey")
+        val sanitizedData = notification.data.filterKeys { key ->
+            sensitiveKeys.none { key.equals(it, ignoreCase = true) }
+        }
 
         // Deduplication check: if dedupKey is specified, prevent duplicate alerts
         if (notification.dedupKey.isNotBlank()) {
@@ -2694,7 +2774,7 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
             "type" to notification.type,
             "title" to notification.title,
             "body" to notification.body,
-            "data" to notification.data,
+            "data" to sanitizedData,
             "channelId" to notification.channelId,
             "read" to false,
             "dedupKey" to notification.dedupKey,
@@ -3280,6 +3360,27 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
             details = "Admission request $normalizedStatus by $reviewedBy" +
                 if (normalizedStatus == "rejected" && rejectionReason.isNotBlank()) " (Reason: ${rejectionReason.trim()})" else ""
         )
+        if (matchedUserId.isNotBlank() && !matchedUserId.startsWith("demo_")) {
+            runCatching {
+                dispatchNotificationWithDeduplication(
+                    AppNotification(
+                        recipientUserId = matchedUserId,
+                        recipientRole = "student",
+                        branchId = req.preferredBranchId,
+                        type = "admission_$normalizedStatus",
+                        title = if (normalizedStatus == "approved") "Admission Approved!" else "Admission Application Update",
+                        body = if (normalizedStatus == "approved") {
+                            "Welcome to True Fighters Martial Arts Academy! Your enrollment at ${req.preferredBranchName.ifBlank { "your selected branch" }} is active."
+                        } else {
+                            "Your admission application status has been updated to $normalizedStatus."
+                        },
+                        channelId = "admissions",
+                        dedupKey = "admission_review_${requestId}_$normalizedStatus",
+                        data = mapOf("requestId" to requestId, "status" to normalizedStatus)
+                    )
+                )
+            }
+        }
     }
 
     // Academy Seed Data (initializes on clean databases)

@@ -15,6 +15,8 @@ import com.example.data.model.BeltRank
 import com.example.data.model.Certificate
 import com.example.data.model.FinancialSummaryReport
 import com.example.data.model.GradingAssessment
+import com.example.data.model.AppNotification
+import com.example.data.model.NotificationPreferences
 import com.example.data.model.Payment
 import com.example.data.model.Program
 import com.example.data.model.Student
@@ -2206,7 +2208,228 @@ class TrueFightersRepositoryRuleTest : FirestoreEmulatorTestBase() {
     }
     assertTrue("Student direct write on auditLogs must be rejected by rules", unauthWrite.isFailure)
   }
+
+  // ==========================================
+  // PHASE 9: NOTIFICATIONS, FCM & HARDENING
+  // ==========================================
+
+  @Test
+  fun phase9_notification_dispatch_deduplication_and_read_status() = runBlocking {
+    val studentUid = signInTestUser("student_notif_recipient@truefighters.in")
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+
+    // 1. Admin dispatches a notification with dedupKey and PII in data map
+    val firstId = repo.dispatchNotificationWithDeduplication(
+      AppNotification(
+        id = "notif_fee_oct_1",
+        recipientUserId = studentUid,
+        recipientRole = "student",
+        branchId = "branch_main",
+        type = "fee_reminder",
+        title = "October Dojo Fee Reminder",
+        body = "Your October fee invoice is due on 10th October.",
+        channelId = "fees",
+        dedupKey = "fee_due_oct_${studentUid}",
+        data = mapOf(
+          "invoiceId" to "inv_oct_01",
+          "phoneNumber" to "+919999988888", // Should be stripped by PII sanitizer
+          "guardianPhone" to "+919999977777" // Should be stripped by PII sanitizer
+        )
+      )
+    ).getOrThrow()
+    assertEquals("notif_fee_oct_1", firstId)
+
+    // 2. Dispatching again with the same dedupKey returns existing ID without creating a duplicate
+    val secondId = repo.dispatchNotificationWithDeduplication(
+      AppNotification(
+        id = "notif_fee_oct_duplicate",
+        recipientUserId = studentUid,
+        recipientRole = "student",
+        branchId = "branch_main",
+        type = "fee_reminder",
+        title = "Duplicate Reminder",
+        body = "Duplicate body",
+        channelId = "fees",
+        dedupKey = "fee_due_oct_${studentUid}"
+      )
+    ).getOrThrow()
+    assertEquals("Deduplication must return original notification ID", firstId, secondId)
+
+    val duplicateSnap = firestore.collection("notifications").document("notif_fee_oct_duplicate").get().await()
+    assertFalse("Duplicate notification document must not be created", duplicateSnap.exists())
+
+    // 3. Verify PII keys were stripped from notification data payload
+    val savedSnap = firestore.collection("notifications").document(firstId).get().await()
+    val savedData = savedSnap.get("data") as? Map<*, *> ?: emptyMap<String, String>()
+    assertEquals("inv_oct_01", savedData["invoiceId"])
+    assertFalse("Sensitive phoneNumber must be stripped from notification payload", savedData.containsKey("phoneNumber"))
+    assertFalse("Sensitive guardianPhone must be stripped from notification payload", savedData.containsKey("guardianPhone"))
+
+    // 4. Recipient student signs in, reads notification, and marks it as read
+    signInTestUser("student_notif_recipient@truefighters.in")
+    val studentNotifSnap = firestore.collection("notifications").document(firstId).get().await()
+    assertTrue("Recipient student can read their notification", studentNotifSnap.exists())
+    assertEquals(false, studentNotifSnap.getBoolean("read"))
+
+    repo.markNotificationAsRead(firstId).getOrThrow()
+    val updatedNotifSnap = firestore.collection("notifications").document(firstId).get().await()
+    assertEquals(true, updatedNotifSnap.getBoolean("read"))
+  }
+
+  @Test
+  fun phase9_notification_privacy_and_unauthorized_injection_denied() = runBlocking {
+    val studentAUid = signInTestUser("student_notif_a@truefighters.in")
+    val studentBUid = signInTestUser("student_notif_b@truefighters.in")
+    val coachMainUid = signInTestUser("coach_notif_main@truefighters.in")
+
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+
+    repo.provisionCoach(
+      UserProfile(
+        userId = coachMainUid,
+        displayName = "Coach Main Notif",
+        email = "coach_notif_main@truefighters.in",
+        phoneNumber = "+919811199001",
+        role = "coach",
+        status = "active",
+        active = true,
+        branchIds = listOf("branch_main")
+      )
+    ).getOrThrow()
+
+    // Admin creates private notification for Student A
+    repo.dispatchNotificationWithDeduplication(
+      AppNotification(
+        id = "notif_private_std_a",
+        recipientUserId = studentAUid,
+        recipientRole = "student",
+        branchId = "branch_main",
+        type = "payment_receipt",
+        title = "Payment Verified",
+        body = "Your fee receipt is ready.",
+        channelId = "fees",
+        dedupKey = "receipt_private_a"
+      )
+    ).getOrThrow()
+
+    // 1. Student B attempts to read Student A's private notification -> Denied
+    signInTestUser("student_notif_b@truefighters.in")
+    val crossStudentRead = runCatching {
+      firestore.collection("notifications").document("notif_private_std_a").get().await()
+    }
+    assertTrue("Student B must not read Student A's private notification", crossStudentRead.isFailure)
+
+    // 2. Student B attempts to inject/create a fake notification -> Denied
+    val studentInject = runCatching {
+      firestore.collection("notifications").document("notif_fake_inject").set(
+        mapOf(
+          "notificationId" to "notif_fake_inject",
+          "recipientUserId" to studentAUid,
+          "recipientRole" to "student",
+          "branchId" to "branch_main",
+          "type" to "announcement",
+          "title" to "Fake Promotion",
+          "body" to "Injected by student",
+          "read" to false
+        )
+      ).await()
+    }
+    assertTrue("Students must not be allowed to create notifications", studentInject.isFailure)
+
+    // 3. Student A attempts to tamper with notification title while marking read -> Denied
+    signInTestUser("student_notif_a@truefighters.in")
+    val studentTamperTitle = runCatching {
+      firestore.collection("notifications").document("notif_private_std_a").update(
+        mapOf(
+          "read" to true,
+          "title" to "Tampered Title"
+        )
+      ).await()
+    }
+    assertTrue("Recipient student can only update 'read'/'updatedAt', not tamper with title", studentTamperTitle.isFailure)
+
+    // 4. Coach assigned to branch_main attempts to send notification for branch_west -> Denied
+    signInTestUser("coach_notif_main@truefighters.in")
+    val crossBranchCoachNotif = runCatching {
+      firestore.collection("notifications").document("notif_coach_cross_branch").set(
+        mapOf(
+          "notificationId" to "notif_coach_cross_branch",
+          "recipientUserId" to "",
+          "recipientRole" to "student",
+          "branchId" to "branch_west",
+          "type" to "class_cancelled",
+          "title" to "West Branch Cancelled",
+          "body" to "Unauthorized coach alert",
+          "read" to false
+        )
+      ).await()
+    }
+    assertTrue("Coach from branch_main must not create notifications for branch_west", crossBranchCoachNotif.isFailure)
+  }
+
+  @Test
+  fun phase9_notification_preferences_fcm_tokens_and_demo_mode_hardening() = runBlocking {
+    val studentAUid = signInTestUser("student_pref_a@truefighters.in")
+    val studentBUid = signInTestUser("student_pref_b@truefighters.in")
+    val repo = TrueFightersRepository(firestore)
+
+    // 1. Student A saves notification preferences and registers FCM token
+    signInTestUser("student_pref_a@truefighters.in")
+    repo.saveNotificationPreferences(
+      NotificationPreferences(
+        userId = studentAUid,
+        classRemindersEnabled = true,
+        feeDueRemindersEnabled = true,
+        gradingAndBeltsEnabled = true,
+        announcementsEnabled = false,
+        admissionsAlertsEnabled = false
+      )
+    ).getOrThrow()
+
+    repo.registerFcmToken(studentAUid, "fcm_token_device_1").getOrThrow()
+    repo.registerFcmToken(studentAUid, "fcm_token_device_1").getOrThrow() // Idempotent registration
+
+    val prefsAfterReg = repo.getNotificationPreferences(studentAUid).getOrThrow()
+    assertEquals(false, prefsAfterReg.announcementsEnabled)
+    assertEquals(1, prefsAfterReg.fcmTokens.size)
+    assertTrue(prefsAfterReg.fcmTokens.contains("fcm_token_device_1"))
+
+    // 2. Student B attempts to read or modify Student A's notificationPreferences / FCM tokens -> Denied
+    signInTestUser("student_pref_b@truefighters.in")
+    val crossUserPrefRead = runCatching {
+      firestore.collection("notificationPreferences").document(studentAUid).get().await()
+    }
+    assertTrue("Student B must not read Student A's notification preferences or FCM tokens", crossUserPrefRead.isFailure)
+
+    val crossUserTokenHijack = runCatching {
+      firestore.collection("notificationPreferences").document(studentAUid).set(
+        mapOf("userId" to studentAUid, "fcmTokens" to listOf("attacker_token"))
+      ).await()
+    }
+    assertTrue("Student B must not overwrite Student A's FCM tokens", crossUserTokenHijack.isFailure)
+
+    // 3. Student A signs in and unregisters FCM token on sign-out
+    signInTestUser("student_pref_a@truefighters.in")
+    repo.unregisterFcmToken(studentAUid, "fcm_token_device_1").getOrThrow()
+    val prefsAfterUnreg = repo.getNotificationPreferences(studentAUid).getOrThrow()
+    assertTrue("FCM token must be removed after unregisterFcmToken", prefsAfterUnreg.fcmTokens.isEmpty())
+
+    // 4. Demo mode hardening: demo accounts cannot register FCM tokens or receive production notifications
+    val demoTokenAttempt = repo.registerFcmToken("demo_student", "fcm_demo_token")
+    assertTrue("Demo mode user must be blocked from registering FCM tokens", demoTokenAttempt.isFailure)
+
+    val demoNotifAttempt = repo.dispatchNotificationWithDeduplication(
+      AppNotification(
+        recipientUserId = "demo_student",
+        recipientRole = "student",
+        title = "Demo Test",
+        body = "Should not be sent"
+      )
+    )
+    assertTrue("Demo mode accounts must be blocked from receiving production notifications", demoNotifAttempt.isFailure)
+  }
 }
-
-
-
