@@ -74,6 +74,9 @@ class MainViewModel(val repository: TrueFightersRepository) : ViewModel() {
     val coaches: StateFlow<List<UserProfile>> = repository.observeCoaches()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
+    val auditLogs: StateFlow<List<AuditLog>> = repository.observeAuditLogs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
+
     private val _roleOverride = MutableStateFlow<String?>(null)
     val roleOverride: StateFlow<String?> = _roleOverride.asStateFlow()
 

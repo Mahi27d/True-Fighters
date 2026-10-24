@@ -2,9 +2,11 @@ package com.example.ui.admin
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -83,14 +85,6 @@ fun AdminDashboardScreen(
     onDeleteVideo: (videoId: String) -> Unit = {},
     onSignOut: () -> Unit
 ) {
-    var selectedBranchId by remember { mutableStateOf("all") }
-    var selectedTab by remember { mutableStateOf(0) } // 0: Overview, 1: Admissions, 2: Branches, 3: Fees, 4: Students, 5: Coaches, 6: Programs, 7: Batches, 8: Schedule, 9: Attendance Reports
-
-    // Dialog states
-    var showAddBranchDialog by remember { mutableStateOf(false) }
-    var showRecordPaymentDialog by remember { mutableStateOf(false) }
-    var showCreateInvoiceDialog by remember { mutableStateOf(false) }
-
     // Filter branches, admissions, and students to admin's authorized branches (empty branchIds = global admin)
     val allowedBranchIds = remember(adminProfile) { adminProfile?.branchIds ?: emptyList() }
     val authorizedBranches = remember(branches, allowedBranchIds) {
@@ -102,6 +96,17 @@ fun AdminDashboardScreen(
     val authorizedStudents = remember(students, allowedBranchIds) {
         if (allowedBranchIds.isEmpty()) students else students.filter { allowedBranchIds.contains(it.branchId) }
     }
+
+    val initialBranch = remember(authorizedBranches, allowedBranchIds) {
+        if (allowedBranchIds.isNotEmpty()) authorizedBranches.firstOrNull()?.effectiveId ?: "all" else "all"
+    }
+    var selectedBranchId by remember(initialBranch) { mutableStateOf(initialBranch) }
+    var selectedTab by remember { mutableStateOf(0) } // 0: Overview, 1: Admissions, 2: Branches, 3: Fees, 4: Students, 5: Coaches, 6: Programs, 7: Batches, 8: Schedule, 9: Reports & Analytics, 10: Belts, 11: Videos
+
+    // Dialog states
+    var showAddBranchDialog by remember { mutableStateOf(false) }
+    var showRecordPaymentDialog by remember { mutableStateOf(false) }
+    var showCreateInvoiceDialog by remember { mutableStateOf(false) }
 
     // Calculated metrics
     val pendingAdmissions = authorizedAdmissions.count { it.status == "pending" }
@@ -173,7 +178,7 @@ fun AdminDashboardScreen(
                 Tab(selected = selectedTab == 6, onClick = { selectedTab = 6 }, text = { Text("Programs (${programs.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
                 Tab(selected = selectedTab == 7, onClick = { selectedTab = 7 }, text = { Text("Batches (${batches.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
                 Tab(selected = selectedTab == 8, onClick = { selectedTab = 8 }, text = { Text("Schedule (${classSessions.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
-                Tab(selected = selectedTab == 9, onClick = { selectedTab = 9 }, text = { Text("Attendance Reports", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
+                Tab(selected = selectedTab == 9, onClick = { selectedTab = 9 }, text = { Text("Reports & Analytics", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
                 val pendingAssessmentsCount = remember(gradingAssessments) { gradingAssessments.count { it.isPending } }
                 Tab(
                     selected = selectedTab == 10,
@@ -196,10 +201,20 @@ fun AdminDashboardScreen(
             when (selectedTab) {
                 0 -> AdminOverviewTab(
                     branches = authorizedBranches,
-                    pendingAdmissions = pendingAdmissions,
-                    totalCollectionsPaise = totalCollectionsPaise,
-                    totalOutstandingPaise = totalOutstandingPaise,
-                    studentsCount = authorizedStudents.size,
+                    students = authorizedStudents,
+                    admissionRequests = authorizedAdmissions,
+                    batches = batches,
+                    programs = programs,
+                    coaches = coaches,
+                    classSessions = classSessions,
+                    attendanceList = attendanceList,
+                    invoices = invoices,
+                    payments = payments,
+                    gradingAssessments = gradingAssessments,
+                    certificates = certificates,
+                    selectedBranchId = selectedBranchId,
+                    onBranchSelected = { selectedBranchId = it },
+                    onNavigateToTab = { selectedTab = it },
                     onOpenAdmissions = { selectedTab = 1 },
                     onOpenAddBranch = { showAddBranchDialog = true },
                     onOpenRecordPayment = { showRecordPaymentDialog = true },
@@ -277,9 +292,21 @@ fun AdminDashboardScreen(
                     onCreateSession = onCreateSession,
                     onRescheduleOrCancel = onRescheduleOrCancelSession
                 )
-                9 -> AdminAttendanceReportsTab(
+                9 -> AdminReportsAndAnalyticsTab(
+                    branches = authorizedBranches,
+                    students = authorizedStudents,
+                    programs = programs,
+                    batches = batches,
+                    classSessions = classSessions,
                     attendanceList = attendanceList,
-                    branches = authorizedBranches
+                    invoices = invoices,
+                    payments = payments,
+                    gradingAssessments = gradingAssessments,
+                    certificates = certificates,
+                    admissionRequests = authorizedAdmissions,
+                    coaches = coaches,
+                    selectedBranchId = selectedBranchId,
+                    onBranchSelected = { selectedBranchId = it }
                 )
                 10 -> AdminBeltAndCertificatesTab(
                     branches = authorizedBranches,
@@ -525,41 +552,174 @@ fun AdminDashboardScreen(
 @Composable
 private fun AdminOverviewTab(
     branches: List<Branch>,
-    pendingAdmissions: Int,
-    totalCollectionsPaise: Long,
-    totalOutstandingPaise: Long,
-    studentsCount: Int,
+    students: List<Student>,
+    admissionRequests: List<AdmissionRequest>,
+    batches: List<Batch>,
+    programs: List<Program>,
+    coaches: List<UserProfile>,
+    classSessions: List<ClassSession>,
+    attendanceList: List<Attendance>,
+    invoices: List<FeeInvoice>,
+    payments: List<Payment>,
+    gradingAssessments: List<GradingAssessment>,
+    certificates: List<Certificate>,
+    selectedBranchId: String,
+    onBranchSelected: (String) -> Unit,
+    onNavigateToTab: (Int) -> Unit,
     onOpenAdmissions: () -> Unit,
     onOpenAddBranch: () -> Unit,
     onOpenRecordPayment: () -> Unit,
     onOpenCreateInvoice: () -> Unit
 ) {
+    val todayStr = remember { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date()) }
+
+    // Branch-level filtering for all overview metrics
+    val filteredStudents = remember(students, selectedBranchId) {
+        if (selectedBranchId == "all") students else students.filter { it.branchId == selectedBranchId }
+    }
+    val activeStudents = filteredStudents.count { it.status.lowercase() == "active" }
+    val suspendedStudents = filteredStudents.count { it.status.lowercase() == "suspended" }
+
+    val filteredAdmissions = remember(admissionRequests, selectedBranchId) {
+        if (selectedBranchId == "all") admissionRequests else admissionRequests.filter { it.preferredBranchId == selectedBranchId }
+    }
+    val pendingAdmissions = filteredAdmissions.count { it.status.lowercase() == "pending" }
+
+    val filteredBatches = remember(batches, selectedBranchId) {
+        if (selectedBranchId == "all") batches else batches.filter { it.branchId == selectedBranchId }
+    }
+    val activeBatches = filteredBatches.count { it.isBatchActive }
+
+    val filteredPrograms = remember(programs, selectedBranchId) {
+        if (selectedBranchId == "all") programs else programs.filter { it.branchIds.isEmpty() || it.branchIds.contains(selectedBranchId) }
+    }
+    val activePrograms = filteredPrograms.count { it.isProgramActive }
+
+    val filteredCoaches = remember(coaches, selectedBranchId) {
+        if (selectedBranchId == "all") coaches else coaches.filter { it.branchIds.isEmpty() || it.branchIds.contains(selectedBranchId) }
+    }
+    val activeCoaches = filteredCoaches.count { it.status.lowercase() == "active" }
+
+    // Today's classes & attendance
+    val todaySessions = remember(classSessions, selectedBranchId, todayStr) {
+        classSessions.filter {
+            (selectedBranchId == "all" || it.branchId == selectedBranchId) &&
+            (it.effectiveDate == todayStr)
+        }
+    }
+    val todayAttendance = remember(attendanceList, selectedBranchId, todayStr) {
+        attendanceList.filter {
+            (selectedBranchId == "all" || it.branchId == selectedBranchId) &&
+            (it.date == todayStr)
+        }
+    }
+    val todayPresent = todayAttendance.count { it.status.lowercase() == "present" || it.status.lowercase() == "late" }
+    val todayPresentRate = if (todayAttendance.isNotEmpty()) (todayPresent * 100) / todayAttendance.size else 0
+
+    // Financial Metrics (integer paise)
+    val filteredInvoices = remember(invoices, selectedBranchId) {
+        if (selectedBranchId == "all") invoices else invoices.filter { it.branchId == selectedBranchId }
+    }
+    val filteredPayments = remember(payments, selectedBranchId) {
+        if (selectedBranchId == "all") payments else payments.filter { it.branchId == selectedBranchId }
+    }
+    val totalCollectionsPaise = filteredPayments.filter { it.status.lowercase() != "refunded" }.sumOf { it.amountPaise }
+    val totalOutstandingPaise = filteredInvoices.filter { it.status.lowercase() != "paid" }.sumOf { (it.amountPaise - it.paidPaise).coerceAtLeast(0L) }
+    val overdueInvoices = filteredInvoices.filter { it.status.lowercase() == "overdue" }
+    val overdueAmountPaise = overdueInvoices.sumOf { (it.amountPaise - it.paidPaise).coerceAtLeast(0L) }
+
+    // Belt Progression & Gradings
+    val filteredAssessments = remember(gradingAssessments, selectedBranchId) {
+        if (selectedBranchId == "all") gradingAssessments else gradingAssessments.filter { it.branchId == selectedBranchId }
+    }
+    val pendingGradingCount = filteredAssessments.count { it.isPending }
+    val approvedPromotionsCount = filteredAssessments.count { it.isApproved }
+    val certificatesIssuedCount = certificates.count { selectedBranchId == "all" || it.branchId == selectedBranchId }
+
+    // Synthesize recent activity from actual Firestore models
+    val recentItems = remember(admissionRequests, payments, gradingAssessments) {
+        val list = mutableListOf<Triple<String, String, String>>() // Title, Subtitle, Date
+        admissionRequests.take(4).forEach {
+            list.add(Triple("Admission: ${it.fullName}", "Status: ${it.status.uppercase()} • Branch: ${it.preferredBranchId}", it.effectiveId))
+        }
+        payments.take(4).forEach {
+            list.add(Triple("Payment: ₹${"%,.0f".format(it.amountPaise / 100.0)} from ${it.studentName}", "Mode: ${it.method} • Ref: ${it.providerReference}", it.paymentDate))
+        }
+        gradingAssessments.take(4).forEach {
+            list.add(Triple("Grading: ${it.studentName} (${it.proposedBeltName})", "Status: ${it.status.uppercase()} • Score: ${it.score}", it.assessmentDate))
+        }
+        list
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // Universal Branch Selector Header
         item {
-            Text(text = "Academy Key Metrics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.FilterAlt, contentDescription = null, tint = RedPrimary, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Executive Branch Scope:",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedBranchId == "all",
+                            onClick = { onBranchSelected("all") },
+                            label = { Text("Academy-Wide (All Branches)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                            modifier = Modifier.testTag("overview_branch_chip_all")
+                        )
+                        branches.forEach { b ->
+                            FilterChip(
+                                selected = selectedBranchId == b.effectiveId,
+                                onClick = { onBranchSelected(b.effectiveId) },
+                                label = { Text(b.name, fontSize = 11.sp) },
+                                modifier = Modifier.testTag("overview_branch_chip_${b.effectiveId}")
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 1: Academy Key Numbers
+        item {
+            Text(text = "Core Academy Telemetry", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
 
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatCard(
+                    title = "Active Students",
+                    value = "$activeStudents",
+                    icon = Icons.Default.Groups,
+                    iconTint = SuccessGreen,
+                    subtitle = if (suspendedStudents > 0) "$suspendedStudents suspended" else "Enrolled in active batches",
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
                     title = "Pending Admissions",
                     value = "$pendingAdmissions",
                     icon = Icons.Default.PendingActions,
                     iconTint = if (pendingAdmissions > 0) RedPrimary else SuccessGreen,
-                    subtitle = "Awaiting review",
-                    modifier = Modifier.weight(1f)
-                )
-                StatCard(
-                    title = "Active Students",
-                    value = if (studentsCount > 0) "$studentsCount" else "142",
-                    icon = Icons.Default.Groups,
-                    iconTint = SuccessGreen,
-                    subtitle = "Across all dojos",
+                    subtitle = "Awaiting verification",
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -568,11 +728,85 @@ private fun AdminOverviewTab(
         item {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatCard(
-                    title = "Monthly Collections",
+                    title = "Active Branches & Batches",
+                    value = "${branches.count { it.active }} / $activeBatches",
+                    icon = Icons.Default.Class,
+                    iconTint = GoldBelt,
+                    subtitle = "$activePrograms programs • $activeCoaches coaches",
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    title = "Grading & Belts",
+                    value = "$pendingGradingCount pending",
+                    icon = Icons.Default.MilitaryTech,
+                    iconTint = if (pendingGradingCount > 0) RedPrimary else GoldBelt,
+                    subtitle = "$approvedPromotionsCount promoted • $certificatesIssuedCount certs",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        // Section 2: Today's Scheduled Classes & Attendance Summary
+        item {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(imageVector = Icons.Default.Event, contentDescription = null, tint = RedPrimary, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = "Today's Schedule & Attendance", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        Surface(shape = RoundedCornerShape(6.dp), color = RedDark) {
+                            Text(text = todayStr, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text(text = "${todaySessions.size}", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = RedPrimary)
+                            Text(text = "Classes Today", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Column {
+                            Text(text = "${todayAttendance.size}", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text(text = "Marked Students", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Column {
+                            Text(text = "$todayPresentRate%", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = SuccessGreen)
+                            Text(text = "Present Rate", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { (todayPresentRate / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                        color = SuccessGreen,
+                        trackColor = MaterialTheme.colorScheme.surface
+                    )
+                }
+            }
+        }
+
+        // Section 3: Financial Health (Invoices, Collections, Overdue)
+        item {
+            Text(text = "Revenue & Collections Health", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        }
+
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatCard(
+                    title = "Verified Collections",
                     value = "₹${"%,.0f".format(totalCollectionsPaise / 100.0)}",
                     icon = Icons.Default.CurrencyRupee,
                     iconTint = SuccessGreen,
-                    subtitle = "Verified receipts",
+                    subtitle = "All verified receipts",
                     modifier = Modifier.weight(1f)
                 )
                 StatCard(
@@ -580,16 +814,16 @@ private fun AdminOverviewTab(
                     value = "₹${"%,.0f".format(totalOutstandingPaise / 100.0)}",
                     icon = Icons.Default.ReceiptLong,
                     iconTint = RedPrimary,
-                    subtitle = "Unpaid invoices",
+                    subtitle = if (overdueInvoices.isNotEmpty()) "${overdueInvoices.size} overdue (₹${"%,.0f".format(overdueAmountPaise / 100.0)})" else "Pending invoices",
                     modifier = Modifier.weight(1f)
                 )
             }
         }
 
+        // Section 4: Quick Action Command Center
         item {
+            Text(text = "Institutional Command Center", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = "Executive Quick Actions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = onOpenAdmissions,
@@ -608,35 +842,60 @@ private fun AdminOverviewTab(
             }
             Spacer(modifier = Modifier.height(6.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onOpenAddBranch, modifier = Modifier.weight(1f)) {
-                    Text("+ Add Branch", fontSize = 11.sp)
+                OutlinedButton(
+                    onClick = { onNavigateToTab(9) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Assessment, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("All Reports", fontSize = 11.sp)
                 }
-                OutlinedButton(onClick = onOpenCreateInvoice, modifier = Modifier.weight(1f)) {
-                    Text("+ New Invoice", fontSize = 11.sp)
+                OutlinedButton(
+                    onClick = { onNavigateToTab(10) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.MilitaryTech, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Gradings ($pendingGradingCount)", fontSize = 11.sp)
                 }
             }
         }
 
+        // Section 5: Recent Institutional Activity
         item {
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(text = "Active Academy Branches (${branches.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(text = "Recent Academy Activity", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         }
 
-        items(branches) { branch ->
-            Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        if (recentItems.isEmpty()) {
+            item {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column {
-                        Text(text = branch.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        Text(text = "Code: ${branch.code} • ${branch.address}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(text = "Phone: ${branch.phone}", fontSize = 11.sp, color = GoldBelt)
+                    Box(modifier = Modifier.padding(20.dp), contentAlignment = Alignment.Center) {
+                        Text("No recent activity recorded yet.", color = TextMuted, fontSize = 12.sp)
                     }
-                    StatusBadge(status = if (branch.active) "Active" else "Inactive")
+                }
+            }
+        } else {
+            items(recentItems.take(6)) { act ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = act.first, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(text = act.second, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text(text = act.third, fontSize = 10.sp, color = TextMuted)
+                    }
                 }
             }
         }

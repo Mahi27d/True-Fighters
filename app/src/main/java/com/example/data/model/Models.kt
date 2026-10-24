@@ -105,7 +105,9 @@ data class AdmissionRequest(
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val reviewedAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
-)
+) {
+    val effectiveId: String get() = id
+}
 
 @IgnoreExtraProperties
 data class Student(
@@ -130,7 +132,10 @@ data class Student(
     val status: String = "active", // "active", "inactive", "suspended"
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
-)
+) {
+    val effectiveId: String get() = id
+    val admissionDate: String get() = joinDate
+}
 
 @IgnoreExtraProperties
 data class Program(
@@ -481,3 +486,72 @@ data class AuditLog(
     val details: String = "",
     @ServerTimestamp val timestamp: Timestamp? = null
 )
+
+data class AcademyOverviewMetrics(
+    val branchId: String = "all",
+    val branchName: String = "All Branches",
+    val totalActiveStudents: Int = 0,
+    val totalSuspendedStudents: Int = 0,
+    val pendingAdmissionsCount: Int = 0,
+    val activeBranchesCount: Int = 0,
+    val activeProgramsCount: Int = 0,
+    val activeBatchesCount: Int = 0,
+    val activeCoachesCount: Int = 0,
+    val todayScheduledSessionsCount: Int = 0,
+    val todayAttendanceMarkedCount: Int = 0,
+    val todayPresentCount: Int = 0,
+    val overallAttendanceRate: Int = 0,
+    val totalCollectionsPaise: Long = 0L,
+    val totalOutstandingPaise: Long = 0L,
+    val overdueInvoicesCount: Int = 0,
+    val overdueAmountPaise: Long = 0L,
+    val totalRefundsPaise: Long = 0L,
+    val pendingGradingAssessmentsCount: Int = 0,
+    val totalApprovedPromotionsCount: Int = 0,
+    val totalCertificatesIssuedCount: Int = 0
+)
+
+data class EnrollmentDistributionItem(
+    val category: String,
+    val activeCount: Int,
+    val totalCount: Int,
+    val percentage: Int
+)
+
+data class BatchOccupancyReportItem(
+    val batchId: String,
+    val batchName: String,
+    val branchName: String,
+    val programName: String,
+    val capacity: Long,
+    val enrolledCount: Int,
+    val occupancyRate: Int,
+    val coachName: String,
+    val schedule: String
+)
+
+data class AttendanceReportSummary(
+    val branchId: String = "all",
+    val totalSessions: Int = 0,
+    val totalLogs: Int = 0,
+    val presentCount: Int = 0,
+    val lateCount: Int = 0,
+    val absentCount: Int = 0,
+    val excusedCount: Int = 0,
+    val presentRate: Int = 0
+)
+
+data class FinancialSummaryReport(
+    val branchId: String = "all",
+    val totalInvoicedPaise: Long = 0L,
+    val totalCollectedPaise: Long = 0L,
+    val totalOutstandingPaise: Long = 0L,
+    val totalOverduePaise: Long = 0L,
+    val totalRefundedPaise: Long = 0L,
+    val paidInvoicesCount: Int = 0,
+    val partialInvoicesCount: Int = 0,
+    val unpaidInvoicesCount: Int = 0,
+    val overdueInvoicesCount: Int = 0,
+    val paymentsCount: Int = 0
+)
+

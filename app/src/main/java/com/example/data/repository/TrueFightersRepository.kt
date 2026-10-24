@@ -2610,6 +2610,312 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
         }
     }
 
+    fun observeAuditLogs(branchId: String? = null, limit: Long = 50): Flow<List<AuditLog>> = callbackFlow {
+        var query: Query = db.collection("auditLogs").limit(limit)
+        if (!branchId.isNullOrBlank() && branchId != "all") {
+            query = db.collection("auditLogs").whereEqualTo("branchId", branchId).limit(limit)
+        }
+        val listener = query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                trySend(emptyList())
+                return@addSnapshotListener
+            }
+            val logs = snapshot?.toObjects(AuditLog::class.java) ?: emptyList()
+            trySend(logs)
+        }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun computeAcademyOverviewMetrics(branchId: String? = null): Result<AcademyOverviewMetrics> = runCatching {
+        val targetBranch = if (branchId.isNullOrBlank()) "all" else branchId
+
+        // 1. Students
+        val studentsSnap = if (targetBranch == "all") {
+            db.collection("students").get().await()
+        } else {
+            db.collection("students").whereEqualTo("branchId", targetBranch).get().await()
+        }
+        val studentDocs = studentsSnap.documents
+        val activeStudents = studentDocs.count { (it.getString("status") ?: "active").lowercase() == "active" }
+        val suspendedStudents = studentDocs.count { (it.getString("status") ?: "").lowercase() == "suspended" }
+
+        // 2. Admissions
+        val admissionsSnap = if (targetBranch == "all") {
+            db.collection("admissionRequests").get().await()
+        } else {
+            db.collection("admissionRequests").whereEqualTo("preferredBranchId", targetBranch).get().await()
+        }
+        val pendingAdmissions = admissionsSnap.documents.count { (it.getString("status") ?: "pending").lowercase() == "pending" }
+
+        // 3. Branches
+        val branchesSnap = db.collection("branches").get().await()
+        val activeBranches = branchesSnap.documents.count { it.getBoolean("active") != false }
+        val branchName = if (targetBranch == "all") {
+            "All Branches (Academy-wide)"
+        } else {
+            branchesSnap.documents.firstOrNull { it.id == targetBranch }?.getString("name") ?: targetBranch
+        }
+
+        // 4. Programs & Batches
+        val programsSnap = db.collection("programs").get().await()
+        val activePrograms = programsSnap.documents.count { it.getBoolean("active") != false }
+
+        val batchesSnap = if (targetBranch == "all") {
+            db.collection("batches").get().await()
+        } else {
+            db.collection("batches").whereEqualTo("branchId", targetBranch).get().await()
+        }
+        val activeBatches = batchesSnap.documents.count { it.getBoolean("active") != false }
+
+        // 5. Coaches
+        val usersSnap = db.collection("users").whereEqualTo("role", "coach").get().await()
+        val activeCoaches = usersSnap.documents.count { doc ->
+            val isActive = (doc.getString("status") ?: "active").lowercase() == "active"
+            if (targetBranch == "all") {
+                isActive
+            } else {
+                val bIds = (doc.get("branchIds") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                isActive && (bIds.isEmpty() || bIds.contains(targetBranch))
+            }
+        }
+
+        // 6. Today's Classes & Attendance
+        val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+        val sessionsSnap = if (targetBranch == "all") {
+            db.collection("classSessions").get().await()
+        } else {
+            db.collection("classSessions").whereEqualTo("branchId", targetBranch).get().await()
+        }
+        val todaySessions = sessionsSnap.documents.count { doc ->
+            val d = doc.getString("sessionDate") ?: doc.getString("date") ?: ""
+            d == todayStr
+        }
+
+        val attendanceSnap = if (targetBranch == "all") {
+            db.collection("attendance").get().await()
+        } else {
+            db.collection("attendance").whereEqualTo("branchId", targetBranch).get().await()
+        }
+        val todayAttendanceDocs = attendanceSnap.documents.filter { (it.getString("date") ?: "") == todayStr }
+        val todayMarked = todayAttendanceDocs.size
+        val todayPresent = todayAttendanceDocs.count {
+            val st = (it.getString("status") ?: "").lowercase()
+            st == "present" || st == "late"
+        }
+
+        val allAttendanceDocs = attendanceSnap.documents
+        val totalAttendanceLogs = allAttendanceDocs.size
+        val totalPresentOrLate = allAttendanceDocs.count {
+            val st = (it.getString("status") ?: "").lowercase()
+            st == "present" || st == "late"
+        }
+        val overallRate = if (totalAttendanceLogs > 0) ((totalPresentOrLate * 100) / totalAttendanceLogs) else 0
+
+        // 7. Invoices & Payments (integer paise)
+        val invoicesSnap = if (targetBranch == "all") {
+            db.collection("feeInvoices").get().await()
+        } else {
+            db.collection("feeInvoices").whereEqualTo("branchId", targetBranch).get().await()
+        }
+        var totalOutstandingPaise = 0L
+        var overdueCount = 0
+        var overdueAmountPaise = 0L
+        for (inv in invoicesSnap.documents) {
+            val amount = inv.getLong("amountPaise") ?: 0L
+            val paid = inv.getLong("paidPaise") ?: 0L
+            val status = (inv.getString("status") ?: "").lowercase()
+            val remaining = (amount - paid).coerceAtLeast(0L)
+            if (status != "paid") {
+                totalOutstandingPaise += remaining
+            }
+            if (status == "overdue") {
+                overdueCount++
+                overdueAmountPaise += remaining
+            }
+        }
+
+        val paymentsSnap = if (targetBranch == "all") {
+            db.collection("payments").get().await()
+        } else {
+            db.collection("payments").whereEqualTo("branchId", targetBranch).get().await()
+        }
+        var totalCollectionsPaise = 0L
+        var totalRefundsPaise = 0L
+        for (pmt in paymentsSnap.documents) {
+            val amt = pmt.getLong("amountPaise") ?: 0L
+            val st = (pmt.getString("status") ?: "").lowercase()
+            if (st == "refunded") {
+                totalRefundsPaise += amt
+            } else {
+                totalCollectionsPaise += amt
+            }
+        }
+
+        // 8. Belt assessments & certificates
+        val assessSnap = if (targetBranch == "all") {
+            db.collection("gradingAssessments").get().await()
+        } else {
+            db.collection("gradingAssessments").whereEqualTo("branchId", targetBranch).get().await()
+        }
+        val pendingGrading = assessSnap.documents.count { (it.getString("status") ?: "").lowercase() == "pending_approval" }
+        val approvedPromotions = assessSnap.documents.count { (it.getString("status") ?: "").lowercase() == "approved" }
+
+        val certsSnap = if (targetBranch == "all") {
+            db.collection("certificates").get().await()
+        } else {
+            db.collection("certificates").whereEqualTo("branchId", targetBranch).get().await()
+        }
+        val certificatesCount = certsSnap.documents.size
+
+        AcademyOverviewMetrics(
+            branchId = targetBranch,
+            branchName = branchName,
+            totalActiveStudents = activeStudents,
+            totalSuspendedStudents = suspendedStudents,
+            pendingAdmissionsCount = pendingAdmissions,
+            activeBranchesCount = activeBranches,
+            activeProgramsCount = activePrograms,
+            activeBatchesCount = activeBatches,
+            activeCoachesCount = activeCoaches,
+            todayScheduledSessionsCount = todaySessions,
+            todayAttendanceMarkedCount = todayMarked,
+            todayPresentCount = todayPresent,
+            overallAttendanceRate = overallRate,
+            totalCollectionsPaise = totalCollectionsPaise,
+            totalOutstandingPaise = totalOutstandingPaise,
+            overdueInvoicesCount = overdueCount,
+            overdueAmountPaise = overdueAmountPaise,
+            totalRefundsPaise = totalRefundsPaise,
+            pendingGradingAssessmentsCount = pendingGrading,
+            totalApprovedPromotionsCount = approvedPromotions,
+            totalCertificatesIssuedCount = certificatesCount
+        )
+    }
+
+    suspend fun computeFinancialReport(branchId: String? = null, period: String? = null): Result<FinancialSummaryReport> = runCatching {
+        val targetBranch = if (branchId.isNullOrBlank()) "all" else branchId
+
+        val invoicesSnap = if (targetBranch == "all") {
+            db.collection("feeInvoices").get().await()
+        } else {
+            db.collection("feeInvoices").whereEqualTo("branchId", targetBranch).get().await()
+        }
+
+        var totalInvoiced = 0L
+        var totalOutstanding = 0L
+        var totalOverdue = 0L
+        var paidCount = 0
+        var partialCount = 0
+        var unpaidCount = 0
+        var overdueCount = 0
+
+        for (doc in invoicesSnap.documents) {
+            val invPeriod = doc.getString("period") ?: ""
+            if (!period.isNullOrBlank() && period != "all" && !invPeriod.contains(period, ignoreCase = true)) {
+                continue
+            }
+            val amount = doc.getLong("amountPaise") ?: 0L
+            val paid = doc.getLong("paidPaise") ?: 0L
+            val status = (doc.getString("status") ?: "unpaid").lowercase()
+            val remaining = (amount - paid).coerceAtLeast(0L)
+
+            totalInvoiced += amount
+            if (status != "paid") {
+                totalOutstanding += remaining
+            }
+
+            when (status) {
+                "paid" -> paidCount++
+                "partially_paid", "partial" -> partialCount++
+                "overdue" -> {
+                    overdueCount++
+                    totalOverdue += remaining
+                }
+                else -> unpaidCount++
+            }
+        }
+
+        val paymentsSnap = if (targetBranch == "all") {
+            db.collection("payments").get().await()
+        } else {
+            db.collection("payments").whereEqualTo("branchId", targetBranch).get().await()
+        }
+
+        var totalCollected = 0L
+        var totalRefunded = 0L
+        var pmtCount = 0
+        for (doc in paymentsSnap.documents) {
+            val amt = doc.getLong("amountPaise") ?: 0L
+            val st = (doc.getString("status") ?: "").lowercase()
+            if (st == "refunded") {
+                totalRefunded += amt
+            } else {
+                totalCollected += amt
+                pmtCount++
+            }
+        }
+
+        FinancialSummaryReport(
+            branchId = targetBranch,
+            totalInvoicedPaise = totalInvoiced,
+            totalCollectedPaise = totalCollected,
+            totalOutstandingPaise = totalOutstanding,
+            totalOverduePaise = totalOverdue,
+            totalRefundedPaise = totalRefunded,
+            paidInvoicesCount = paidCount,
+            partialInvoicesCount = partialCount,
+            unpaidInvoicesCount = unpaidCount,
+            overdueInvoicesCount = overdueCount,
+            paymentsCount = pmtCount
+        )
+    }
+
+    suspend fun computeAttendanceSummary(branchId: String? = null, startDate: String? = null, endDate: String? = null): Result<AttendanceReportSummary> = runCatching {
+        val targetBranch = if (branchId.isNullOrBlank()) "all" else branchId
+
+        val query = if (targetBranch == "all") {
+            db.collection("attendance")
+        } else {
+            db.collection("attendance").whereEqualTo("branchId", targetBranch)
+        }
+        val snap = query.get().await()
+
+        var totalLogs = 0
+        var present = 0
+        var late = 0
+        var absent = 0
+        var excused = 0
+        val sessionIds = mutableSetOf<String>()
+
+        for (doc in snap.documents) {
+            val d = doc.getString("date") ?: ""
+            if (!startDate.isNullOrBlank() && d < startDate) continue
+            if (!endDate.isNullOrBlank() && d > endDate) continue
+
+            totalLogs++
+            doc.getString("sessionId")?.let { if (it.isNotBlank()) sessionIds.add(it) }
+
+            when ((doc.getString("status") ?: "").lowercase()) {
+                "present" -> present++
+                "late" -> late++
+                "absent" -> absent++
+                "excused" -> excused++
+            }
+        }
+
+        val rate = if (totalLogs > 0) ((present + late) * 100) / totalLogs else 0
+        AttendanceReportSummary(
+            branchId = targetBranch,
+            totalSessions = sessionIds.size,
+            totalLogs = totalLogs,
+            presentCount = present,
+            lateCount = late,
+            absentCount = absent,
+            excusedCount = excused,
+            presentRate = rate
+        )
+    }
+
     suspend fun getStudentDetails(studentId: String): Result<Student> = runCatching {
         if (studentId.isBlank()) throw IllegalArgumentException("Student ID is required.")
         val doc = db.collection("students").document(studentId).get().await()

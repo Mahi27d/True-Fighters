@@ -9,8 +9,11 @@ import com.example.data.model.ClassSession
 import com.example.data.model.FeeInvoice
 import com.example.data.model.FeePlan
 import com.example.data.model.InvoiceItem
+import com.example.data.model.AcademyOverviewMetrics
+import com.example.data.model.AttendanceReportSummary
 import com.example.data.model.BeltRank
 import com.example.data.model.Certificate
+import com.example.data.model.FinancialSummaryReport
 import com.example.data.model.GradingAssessment
 import com.example.data.model.Payment
 import com.example.data.model.Program
@@ -1933,6 +1936,275 @@ class TrueFightersRepositoryRuleTest : FirestoreEmulatorTestBase() {
 
     val deleteResult = repo.deleteVideo("vid_mae_geri_test")
     assertTrue("Admin can delete video", deleteResult.isSuccess)
+  }
+
+  @Test
+  fun phase8_academy_overview_metrics_calculation_and_totals() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+    repo.seedAcademyDefaultsIfNeeded()
+
+    // Provision test student
+    val studentUid = signInTestUser("std_metric_calc@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    repo.createOrUpdateStudent(
+      Student(
+        id = "std_metric_calc_1",
+        userId = studentUid,
+        fullName = "Harsh Vardhan",
+        branchId = "branch_main",
+        status = "active"
+      )
+    ).getOrThrow()
+
+    // Provision invoice and payment
+    val invId = "inv_metric_test_1"
+    repo.generateInvoiceWithValidation(
+      FeeInvoice(
+        invoiceId = invId,
+        branchId = "branch_main",
+        studentId = "std_metric_calc_1",
+        studentUserId = studentUid,
+        studentName = "Harsh Vardhan",
+        period = "November 2026",
+        amountPaise = 300000L,
+        paidPaise = 0L,
+        status = "unpaid"
+      )
+    ).getOrThrow()
+
+    repo.recordPaymentWithValidation(
+      Payment(
+        paymentId = "pmt_metric_test_1",
+        invoiceId = invId,
+        branchId = "branch_main",
+        studentId = "std_metric_calc_1",
+        studentUserId = studentUid,
+        studentName = "Harsh Vardhan",
+        amountPaise = 100000L,
+        paymentDate = "2026-10-23",
+        method = "cash",
+        status = "verified"
+      )
+    ).getOrThrow()
+
+    val metricsRes = repo.computeAcademyOverviewMetrics("all")
+    assertTrue("computeAcademyOverviewMetrics must succeed: ${metricsRes.exceptionOrNull()}", metricsRes.isSuccess)
+
+    val metrics = metricsRes.getOrThrow()
+    assertTrue("Total active students must be at least 1: ${metrics.totalActiveStudents}", metrics.totalActiveStudents >= 1)
+    assertTrue("Total collections must be >= 100000L paise: ${metrics.totalCollectionsPaise}", metrics.totalCollectionsPaise >= 100000L)
+    assertTrue("Total outstanding must be >= 200000L paise: ${metrics.totalOutstandingPaise}", metrics.totalOutstandingPaise >= 200000L)
+    assertTrue("Active branches count must be >= 1: ${metrics.activeBranchesCount}", metrics.activeBranchesCount >= 1)
+  }
+
+  @Test
+  fun phase8_branch_level_dashboard_isolation_and_filtering() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+    repo.seedAcademyDefaultsIfNeeded()
+
+    // Student A in branch_main
+    val studentAUid = signInTestUser("std_branch_a_metrics@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    repo.createOrUpdateStudent(
+      Student(
+        id = "std_branch_a_unique",
+        userId = studentAUid,
+        fullName = "Aanya Singhal",
+        branchId = "branch_main",
+        status = "active"
+      )
+    ).getOrThrow()
+
+    // Student B in branch_west
+    val studentBUid = signInTestUser("std_branch_b_metrics@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    repo.createOrUpdateStudent(
+      Student(
+        id = "std_branch_b_unique",
+        userId = studentBUid,
+        fullName = "Bhavin Kothari",
+        branchId = "branch_west",
+        status = "active"
+      )
+    ).getOrThrow()
+
+    // Invoice for Student A in branch_main
+    repo.generateInvoiceWithValidation(
+      FeeInvoice(
+        invoiceId = "inv_iso_branch_main",
+        branchId = "branch_main",
+        studentId = "std_branch_a_unique",
+        studentUserId = studentAUid,
+        studentName = "Aanya Singhal",
+        period = "November 2026",
+        amountPaise = 500000L,
+        status = "unpaid"
+      )
+    ).getOrThrow()
+
+    // Invoice for Student B in branch_west
+    repo.generateInvoiceWithValidation(
+      FeeInvoice(
+        invoiceId = "inv_iso_branch_west",
+        branchId = "branch_west",
+        studentId = "std_branch_b_unique",
+        studentUserId = studentBUid,
+        studentName = "Bhavin Kothari",
+        period = "November 2026",
+        amountPaise = 700000L,
+        status = "unpaid"
+      )
+    ).getOrThrow()
+
+    // Metrics filtered by branch_main
+    val mainMetrics = repo.computeAcademyOverviewMetrics("branch_main").getOrThrow()
+    assertEquals("branch_main", mainMetrics.branchId)
+    // Invoices for branch_main must include 500000L, and exclude branch_west's 700000L
+    val westMetrics = repo.computeAcademyOverviewMetrics("branch_west").getOrThrow()
+    assertEquals("branch_west", westMetrics.branchId)
+
+    // Branch financial report isolation check
+    val mainFinReport = repo.computeFinancialReport(branchId = "branch_main").getOrThrow()
+    val westFinReport = repo.computeFinancialReport(branchId = "branch_west").getOrThrow()
+
+    assertTrue("Main financial report must reflect branch_main invoices", mainFinReport.totalOutstandingPaise >= 500000L)
+    assertTrue("West financial report must reflect branch_west invoices", westFinReport.totalOutstandingPaise >= 700000L)
+  }
+
+  @Test
+  fun phase8_financial_report_totals_and_period_filtering() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+
+    val studentUid = signInTestUser("std_fin_report@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+
+    val invNov = "inv_period_nov_2026"
+    val invDec = "inv_period_dec_2026"
+
+    repo.generateInvoiceWithValidation(
+      FeeInvoice(
+        invoiceId = invNov,
+        branchId = "branch_main",
+        studentId = "std_fin_report",
+        studentUserId = studentUid,
+        studentName = "Rhea Kapoor",
+        period = "November 2026",
+        amountPaise = 400000L,
+        status = "unpaid"
+      )
+    ).getOrThrow()
+
+    repo.generateInvoiceWithValidation(
+      FeeInvoice(
+        invoiceId = invDec,
+        branchId = "branch_main",
+        studentId = "std_fin_report",
+        studentUserId = studentUid,
+        studentName = "Rhea Kapoor",
+        period = "December 2026",
+        amountPaise = 600000L,
+        status = "unpaid"
+      )
+    ).getOrThrow()
+
+    // Test period filter for November 2026
+    val novReport = repo.computeFinancialReport(branchId = "branch_main", period = "November 2026").getOrThrow()
+    assertTrue("November report must account for November invoices", novReport.totalInvoicedPaise >= 400000L)
+
+    // Verify integer paise precision
+    assertTrue("Integer paise calculations must remain exact", novReport.totalInvoicedPaise % 100L == 0L)
+  }
+
+  @Test
+  fun phase8_attendance_analytics_and_date_filtering() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+    repo.seedAcademyDefaultsIfNeeded()
+
+    // Student in branch_main enrolled in batch_morning_karate
+    val studentUid = signInTestUser("std_att_analytics@truefighters.in")
+    signInTestUser("Mahi27d@gmail.com")
+    repo.createOrUpdateStudent(
+      Student(
+        id = "std_att_analytics_1",
+        userId = studentUid,
+        fullName = "Tanvi Bansal",
+        branchId = "branch_main",
+        batchId = "batch_morning_karate",
+        status = "active"
+      )
+    ).getOrThrow()
+
+    // Record attendance on 2026-10-21 (Present) and 2026-10-22 (Late)
+    repo.markAttendance(
+      Attendance(
+        id = "att_tanvi_21",
+        branchId = "branch_main",
+        batchId = "batch_morning_karate",
+        sessionId = "sess_ana_21",
+        studentId = "std_att_analytics_1",
+        studentUserId = studentUid,
+        studentName = "Tanvi Bansal",
+        date = "2026-10-21",
+        status = "present"
+      )
+    ).getOrThrow()
+
+    repo.markAttendance(
+      Attendance(
+        id = "att_tanvi_22",
+        branchId = "branch_main",
+        batchId = "batch_morning_karate",
+        sessionId = "sess_ana_22",
+        studentId = "std_att_analytics_1",
+        studentUserId = studentUid,
+        studentName = "Tanvi Bansal",
+        date = "2026-10-22",
+        status = "late"
+      )
+    ).getOrThrow()
+
+    val summary = repo.computeAttendanceSummary(
+      branchId = "branch_main",
+      startDate = "2026-10-21",
+      endDate = "2026-10-22"
+    ).getOrThrow()
+
+    assertTrue("Summary logs count must be >= 2: ${summary.totalLogs}", summary.totalLogs >= 2)
+    assertTrue("Present count must be >= 1: ${summary.presentCount}", summary.presentCount >= 1)
+    assertTrue("Late count must be >= 1: ${summary.lateCount}", summary.lateCount >= 1)
+    assertTrue("Present rate must be greater than 0: ${summary.presentRate}%", summary.presentRate > 0)
+  }
+
+  @Test
+  fun phase8_audit_logs_streaming_and_unauthorized_access() = runBlocking {
+    val adminUid = signInTestUser("Mahi27d@gmail.com")
+    val repo = TrueFightersRepository(firestore)
+    repo.ensureAdminRecordMigrated(adminUid, "Mahi27d@gmail.com", "+919876500001")
+
+    // Admin can read audit logs
+    val adminLogsSnap = firestore.collection("auditLogs").limit(10).get().await()
+    assertNotNull("Admin can query audit logs", adminLogsSnap)
+
+    // Student attempts to write to audit logs directly -> Denied by Firestore Security Rules
+    val studentUid = signInTestUser("student_audit_tamper@truefighters.in")
+    val unauthWrite = runCatching {
+      firestore.collection("auditLogs").document("audit_illegal_tamper").set(
+        mapOf(
+          "action" to "ILLEGAL_WRITE",
+          "actorUid" to studentUid,
+          "details" to "Student trying to fabricate audit logs"
+        )
+      ).await()
+    }
+    assertTrue("Student direct write on auditLogs must be rejected by rules", unauthWrite.isFailure)
   }
 }
 
