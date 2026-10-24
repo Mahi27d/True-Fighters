@@ -77,6 +77,43 @@ class MainViewModel(val repository: TrueFightersRepository) : ViewModel() {
     val auditLogs: StateFlow<List<AuditLog>> = repository.observeAuditLogs()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
+    private val _userNotifications = MutableStateFlow<List<AppNotification>>(emptyList())
+    val userNotifications: StateFlow<List<AppNotification>> = _userNotifications.asStateFlow()
+
+    private val _notificationPreferences = MutableStateFlow(NotificationPreferences())
+    val notificationPreferences: StateFlow<NotificationPreferences> = _notificationPreferences.asStateFlow()
+
+    fun loadUserNotifications(userId: String) {
+        viewModelScope.launch {
+            repository.observeUserNotifications(userId).collect {
+                _userNotifications.value = it
+            }
+        }
+        viewModelScope.launch {
+            _notificationPreferences.value = repository.getNotificationPreferences(userId).getOrDefault(NotificationPreferences(userId = userId))
+        }
+    }
+
+    fun markNotificationAsRead(id: String) {
+        viewModelScope.launch {
+            repository.markNotificationAsRead(id)
+        }
+    }
+
+    fun saveNotificationPreferences(prefs: NotificationPreferences) {
+        viewModelScope.launch {
+            _notificationPreferences.value = prefs
+            repository.saveNotificationPreferences(prefs)
+        }
+    }
+
+    fun sendNotification(notification: AppNotification, onResult: (Result<String>) -> Unit = {}) {
+        viewModelScope.launch {
+            val res = repository.dispatchNotificationWithDeduplication(notification)
+            onResult(res)
+        }
+    }
+
     private val _roleOverride = MutableStateFlow<String?>(null)
     val roleOverride: StateFlow<String?> = _roleOverride.asStateFlow()
 

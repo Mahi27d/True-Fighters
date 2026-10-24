@@ -2582,6 +2582,136 @@ class TrueFightersRepository(val db: FirebaseFirestore) {
         id
     }
 
+    // Notifications & FCM
+    fun observeUserNotifications(userId: String): Flow<List<AppNotification>> = callbackFlow {
+        if (userId.isBlank()) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val query = db.collection("notifications")
+            .whereEqualTo("recipientUserId", userId)
+        val listener = query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                trySend(emptyList())
+                return@addSnapshotListener
+            }
+            val list = snapshot?.toObjects(AppNotification::class.java) ?: emptyList()
+            trySend(list)
+        }
+        awaitClose { listener.remove() }
+    }
+
+    suspend fun markNotificationAsRead(notificationId: String): Result<Unit> = runCatching {
+        if (notificationId.isBlank()) return@runCatching
+        db.collection("notifications").document(notificationId)
+            .update(
+                mapOf(
+                    "read" to true,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+    }
+
+    suspend fun getNotificationPreferences(userId: String): Result<NotificationPreferences> = runCatching {
+        if (userId.isBlank()) return@runCatching NotificationPreferences()
+        val snap = db.collection("notificationPreferences").document(userId).get().await()
+        if (snap.exists()) {
+            snap.toObject(NotificationPreferences::class.java) ?: NotificationPreferences(userId = userId)
+        } else {
+            NotificationPreferences(userId = userId)
+        }
+    }
+
+    suspend fun saveNotificationPreferences(preferences: NotificationPreferences): Result<Unit> = runCatching {
+        if (preferences.userId.isBlank()) throw IllegalArgumentException("User ID is required.")
+        val data = mapOf(
+            "userId" to preferences.userId,
+            "classRemindersEnabled" to preferences.classRemindersEnabled,
+            "feeDueRemindersEnabled" to preferences.feeDueRemindersEnabled,
+            "gradingAndBeltsEnabled" to preferences.gradingAndBeltsEnabled,
+            "announcementsEnabled" to preferences.announcementsEnabled,
+            "admissionsAlertsEnabled" to preferences.admissionsAlertsEnabled,
+            "fcmTokens" to preferences.fcmTokens,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        db.collection("notificationPreferences").document(preferences.userId).set(data, SetOptions.merge()).await()
+    }
+
+    suspend fun registerFcmToken(userId: String, token: String): Result<Unit> = runCatching {
+        if (userId.isBlank() || token.isBlank()) return@runCatching
+        val prefRef = db.collection("notificationPreferences").document(userId)
+        val snap = prefRef.get().await()
+        val currentTokens = (snap.get("fcmTokens") as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+        if (!currentTokens.contains(token)) {
+            prefRef.set(
+                mapOf(
+                    "userId" to userId,
+                    "fcmTokens" to FieldValue.arrayUnion(token),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ),
+                SetOptions.merge()
+            ).await()
+        }
+    }
+
+    suspend fun unregisterFcmToken(userId: String, token: String): Result<Unit> = runCatching {
+        if (userId.isBlank() || token.isBlank()) return@runCatching
+        db.collection("notificationPreferences").document(userId).update(
+            mapOf(
+                "fcmTokens" to FieldValue.arrayRemove(token),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+        ).await()
+    }
+
+    suspend fun dispatchNotificationWithDeduplication(notification: AppNotification): Result<String> = runCatching {
+        if (notification.title.isBlank()) throw IllegalArgumentException("Notification title cannot be blank.")
+        if (notification.recipientUserId.isBlank() && notification.recipientRole.isBlank()) {
+            throw IllegalArgumentException("Notification must target a user or role.")
+        }
+
+        // Deduplication check: if dedupKey is specified, prevent duplicate alerts
+        if (notification.dedupKey.isNotBlank()) {
+            val existing = db.collection("notifications")
+                .whereEqualTo("dedupKey", notification.dedupKey)
+                .limit(1)
+                .get().await()
+            if (!existing.isEmpty) {
+                val existingDoc = existing.documents.first()
+                Log.d(TAG, "Notification with dedupKey ${notification.dedupKey} already sent, skipping duplicate.")
+                return@runCatching existingDoc.id
+            }
+        }
+
+        val id = if (notification.id.isNotBlank()) notification.id else if (notification.notificationId.isNotBlank()) notification.notificationId else "notif_${UUID.randomUUID().toString().take(10)}"
+        val data = mapOf(
+            "notificationId" to id,
+            "recipientUserId" to notification.recipientUserId,
+            "recipientRole" to notification.recipientRole,
+            "branchId" to notification.branchId,
+            "batchId" to notification.batchId,
+            "type" to notification.type,
+            "title" to notification.title,
+            "body" to notification.body,
+            "data" to notification.data,
+            "channelId" to notification.channelId,
+            "read" to false,
+            "dedupKey" to notification.dedupKey,
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+        db.collection("notifications").document(id).set(data).await()
+
+        recordAuditLog(
+            action = "NOTIFICATION_DISPATCHED",
+            targetType = "notification",
+            targetId = id,
+            branchId = notification.branchId,
+            details = "Dispatched ${notification.type} notification: '${notification.title}' to ${notification.recipientUserId.ifBlank { notification.recipientRole }}"
+        )
+        id
+    }
+
     private suspend fun recordAuditLog(
         action: String,
         targetType: String,

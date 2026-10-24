@@ -358,6 +358,44 @@ service cloud.firestore {
       allow write: if isCoach() || isAdmin();
     }
 
+    // Notifications
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && (
+        resource == null ||
+        resource.data.get('recipientUserId', '') == request.auth.uid ||
+        resource.data.get('recipientRole', '') == 'all' ||
+        isAdmin() ||
+        (isCoachForBranch(resource.data.get('branchId', '')) && resource.data.get('recipientRole', '') == 'coach')
+      );
+      allow list: if isSignedIn() && (
+        resource.data.get('recipientUserId', '') == request.auth.uid ||
+        resource.data.get('recipientRole', '') == 'all' ||
+        isAdmin() ||
+        isCoach()
+      );
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        (isCoachForBranch(incoming().get('branchId', '')) && incoming().get('type', '') in ['schedule', 'attendance', 'grading'])
+      ) &&
+      incoming().get('title', '') is string && incoming().get('title', '').size() > 0;
+      allow update: if isSignedIn() && (
+        (request.auth.uid == resource.data.get('recipientUserId', '') &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['read', 'updatedAt'])) ||
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && (
+        request.auth.uid == resource.data.get('recipientUserId', '') ||
+        isAdmin()
+      );
+    }
+
+    // Notification Preferences
+    match /notificationPreferences/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create, update: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
     // Audit Logs
     match /auditLogs/{logId} {
       allow read, write: if isAdmin();

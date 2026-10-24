@@ -555,3 +555,37 @@ data class FinancialSummaryReport(
     val paymentsCount: Int = 0
 )
 
+@IgnoreExtraProperties
+data class AppNotification(
+    @DocumentId val id: String = "",
+    val notificationId: String = "",
+    val recipientUserId: String = "",
+    val recipientRole: String = "student", // "student", "coach", "admin", "all"
+    val branchId: String = "",
+    val batchId: String = "",
+    val type: String = "general", // "admission", "schedule", "attendance", "fee", "grading", "announcement"
+    val title: String = "",
+    val body: String = "",
+    val data: Map<String, String> = emptyMap(),
+    val channelId: String = "general_notifications",
+    val read: Boolean = false,
+    val dedupKey: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null
+) {
+    val effectiveId: String get() = id.ifBlank { notificationId }
+}
+
+@IgnoreExtraProperties
+data class NotificationPreferences(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val classRemindersEnabled: Boolean = true,
+    val feeDueRemindersEnabled: Boolean = true,
+    val gradingAndBeltsEnabled: Boolean = true,
+    val announcementsEnabled: Boolean = true,
+    val admissionsAlertsEnabled: Boolean = true,
+    val fcmTokens: List<String> = emptyList(),
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+
